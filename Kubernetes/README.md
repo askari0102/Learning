@@ -2,7 +2,7 @@
 
 ## How to use this guide
 
-This guide is written to stand alone: every technical term is explained where it is first used, so no external lookup should be necessary. A consolidated lookup list is in [Part 36 — Glossary](#part-36-glossary), and the larger parts begin with a short list of the vocabulary they introduce, so a reader can jump straight to a term's definition or find where a concept is treated in depth.
+This guide is written to stand alone: every technical term is explained where it is first used, so no external lookup should be necessary. A consolidated lookup list is in [Part 36 — Glossary](#part-36--glossary), and the larger parts begin with a short list of the vocabulary they introduce, so a reader can jump straight to a term's definition or find where a concept is treated in depth.
 
 It can be read straight through as a course — Parts 1–5 are foundations and are best read in order — or used as a reference, since each part from 6 onward is largely self-contained.
 
@@ -18,15 +18,15 @@ It can be read straight through as a course — Parts 1–5 are foundations and 
 | **kubeconfig** | The credential file that tells client tools which cluster to talk to and how to authenticate. [Part 4.1](#41-the-kubeconfig) |
 | **Workload** | A generic word for an application running on the cluster — a web API, a batch job, a database. Not a Kubernetes object type. |
 | **Manifest** | A YAML or JSON file declaring Kubernetes objects. [Part 5.1](#51-objects-kinds-and-the-shape-of-everything) |
-| **Namespace** | A scope for names and a unit of policy — the primary way work is partitioned inside a cluster. [Part 23](#part-23-namespaces-and-multi-tenancy) |
+| **Namespace** | A scope for names and a unit of policy — the primary way work is partitioned inside a cluster. [Part 23](#part-23--namespaces-and-multi-tenancy) |
 | **Ingress** | The legacy Kubernetes API for routing external HTTP traffic to services. Superseded by Gateway API. [Part 12.3](#123-gateway-api-vs-ingress-the-honest-comparison) |
-| **Gateway API** | The modern, portable set of objects describing how traffic enters the cluster, replacing Ingress. [Part 12](#part-12-the-gateway-api-in-full) |
-| **Reverse proxy** | Software that sits in front of servers, accepting requests and routing them to backends. Every cluster has at least one. [Part 11](#part-11-reverse-proxies-in-full) |
+| **Gateway API** | The modern, portable set of objects describing how traffic enters the cluster, replacing Ingress. [Part 12](#part-12--the-gateway-api-in-full) |
+| **Reverse proxy** | Software that sits in front of servers, accepting requests and routing them to backends. Every cluster has at least one. [Part 11](#part-11--reverse-proxies-in-full) |
 | **HPA** | Horizontal Pod Autoscaler: adds or removes pod replicas based on metrics such as CPU. [Part 25.1](#251-hpa) |
-| **GitOps** | Keeping the cluster's desired state in git and having a controller in the cluster continuously reconcile reality to it. [Part 21](#part-21-gitops) |
-| **cert-manager** | A controller that obtains and renews TLS certificates automatically. [Part 14](#part-14-tls-and-certificates) |
+| **GitOps** | Keeping the cluster's desired state in git and having a controller in the cluster continuously reconcile reality to it. [Part 21](#part-21--gitops) |
+| **cert-manager** | A controller that obtains and renews TLS certificates automatically. [Part 14](#part-14--tls-and-certificates) |
 | **eBPF** | A Linux kernel technology allowing programs to run safely inside the kernel — used for high-performance networking and security. [Part 9.2](#92-the-cni-layer) |
-| **KEDA** | An autoscaler that scales workloads based on external events such as queue depth, and can scale to zero. [Part 25](#part-25-autoscaling-and-capacity) |
+| **KEDA** | An autoscaler that scales workloads based on external events such as queue depth, and can scale to zero. [Part 25](#part-25--autoscaling-and-capacity) |
 | **SPIFFE** | A standard for giving each workload a cryptographic identity, so services can authenticate each other rather than trusting network location. [Part 13.1](#131-what-a-mesh-actually-provides) |
 
 **What this guide covers, and what it deliberately does not.** It is a complete guide to *operating Kubernetes itself*: the platform, its primitives, and the practices around them. It is deliberately not a guide to any particular vendor or domain. Specifically out of scope, so you know where to look next:
@@ -59,7 +59,7 @@ Where a topic is genuinely contested or the ecosystem is split, the guide says s
 - **Ingress NGINX retirement** — the de-facto default ingress controller is gone. Gateway API is the direction, and there is an official **Ingress2Gateway** migration tool (1.0 released Mar 2026). [Part 12.4](#124-migrating-from-ingress)
 - **`Service` `externalIPs` deprecated in 1.36.** Upstream's guidance is that all users should migrate away from it, toward a load-balancer controller or a Gateway API implementation. It is deprecated rather than removed, so existing manifests still work — but it is on the way out and cannot support dual-stack.
 - **In-place Pod resize is Stable** (1.35) and **HPA scale-to-zero is Beta** (1.37) — changing a pod's CPU/memory without restarting it, and scaling a workload to zero replicas, are now supported.
-- **DRA (Dynamic Resource Allocation) reached GA in 1.34** and continues to expand. It is the modern way to request GPUs, NICs, and FPGAs, replacing the older integer-resource approach. [Part 30.3](#303-gpu-resource-management-dra-is-the-modern-answer)
+- **DRA (Dynamic Resource Allocation) reached GA in 1.34** and continues to expand. It is the modern way to request GPUs, NICs, and FPGAs, replacing the older integer-resource approach. [Part 30.3](#303-gpu-resource-management--dra-is-the-modern-answer)
 - **AI workloads are now first-class**: the **AI Gateway Working Group** (Mar 2026) and the **Gateway API Inference Extension** exist specifically for routing LLM inference traffic (KV-cache-aware, prefix-aware, model-aware routing). [Part 30.1](#301-inference-serving-models)
 - **Pod Certificates and Cluster Trust Bundles** (1.37) give workloads API-managed cryptographic identities, reducing the need to distribute long-lived secrets for service-to-service authentication. [Part 8.2](#82-secrets-and-why-the-default-is-not-secure)
 
@@ -68,69 +68,69 @@ Where a topic is genuinely contested or the ecosystem is split, the guide says s
 ## Table of Contents
 
 **Foundations**
-1. [What Kubernetes Actually Is](#part-1-what-kubernetes-actually-is)
-2. [Cluster Anatomy](#part-2-cluster-anatomy)
-3. [How the Cluster Itself Is Built and Managed](#part-3-how-the-cluster-itself-is-built-and-managed)
-4. [Accessing the Cluster](#part-4-accessing-the-cluster)
-5. [The API and the Resource Model](#part-5-the-api-and-the-resource-model)
+1. [What Kubernetes Actually Is](#part-1--what-kubernetes-actually-is)
+2. [Cluster Anatomy](#part-2--cluster-anatomy)
+3. [How the Cluster Itself Is Built and Managed](#part-3--how-the-cluster-itself-is-built-and-managed)
+4. [Accessing the Cluster](#part-4--accessing-the-cluster)
+5. [The API and the Resource Model](#part-5--the-api-and-the-resource-model)
 
 **Workloads and Configuration**
-6. [Workloads](#part-6-workloads)
-7. [Templating and Packaging: Helm, Kustomize, Jsonnet](#part-7-templating-and-packaging-helm-kustomize-jsonnet)
-8. [Configuration and Secrets](#part-8-configuration-and-secrets)
+6. [Workloads](#part-6--workloads)
+7. [Templating and Packaging: Helm, Kustomize, Jsonnet](#part-7--templating-and-packaging-helm-kustomize-jsonnet)
+8. [Configuration and Secrets](#part-8--configuration-and-secrets)
 
 **Networking — the long section**
-9. [Networking Fundamentals, From Zero](#part-9-networking-fundamentals-from-zero)
-10. [Load Balancing: The Four Layers](#part-10-load-balancing-the-four-layers)
-11. [Reverse Proxies, In Full](#part-11-reverse-proxies-in-full)
-12. [The Gateway API, In Full](#part-12-the-gateway-api-in-full)
-13. [Service Mesh](#part-13-service-mesh)
-14. [TLS and Certificates](#part-14-tls-and-certificates)
-15. [DNS, Egress, and Multi-Cluster Networking](#part-15-dns-egress-and-multi-cluster-networking)
+9. [Networking Fundamentals, From Zero](#part-9--networking-fundamentals-from-zero)
+10. [Load Balancing: The Four Layers](#part-10--load-balancing-the-four-layers)
+11. [Reverse Proxies, In Full](#part-11--reverse-proxies-in-full)
+12. [The Gateway API, In Full](#part-12--the-gateway-api-in-full)
+13. [Service Mesh](#part-13--service-mesh)
+14. [TLS and Certificates](#part-14--tls-and-certificates)
+15. [DNS, Egress, and Multi-Cluster Networking](#part-15--dns-egress-and-multi-cluster-networking)
 
 **State**
-16. [Storage](#part-16-storage)
-17. [Databases and Stateful Data](#part-17-databases-and-stateful-data)
+16. [Storage](#part-16--storage)
+17. [Databases and Stateful Data](#part-17--databases-and-stateful-data)
 
 **Security**
-18. [Security](#part-18-security)
+18. [Security](#part-18--security)
 
 **Operating**
-19. [Observability](#part-19-observability)
-20. [Debugging](#part-20-debugging)
-21. [GitOps](#part-21-gitops)
-22. [CI/CD: The Actual Workflow](#part-22-cicd-the-actual-workflow)
-23. [Namespaces and Multi-Tenancy](#part-23-namespaces-and-multi-tenancy)
-24. [Environments: One Cluster or Many?](#part-24-environments-one-cluster-or-many)
-25. [Autoscaling and Capacity](#part-25-autoscaling-and-capacity)
-26. [Cluster Lifecycle Operations](#part-26-cluster-lifecycle-operations)
-27. [Backup, Disaster Recovery, and Business Continuity](#part-27-backup-disaster-recovery-and-business-continuity)
-28. [Multi-Cluster and Multi-Region](#part-28-multi-cluster-and-multi-region)
-29. [Cost](#part-29-cost)
-30. [AI/ML and GPU Workloads](#part-30-aiml-and-gpu-workloads)
-31. [Platform Engineering: Building the Golden Path](#part-31-platform-engineering-building-the-golden-path)
+19. [Observability](#part-19--observability)
+20. [Debugging](#part-20--debugging)
+21. [GitOps](#part-21--gitops)
+22. [CI/CD: The Actual Workflow](#part-22--cicd-the-actual-workflow)
+23. [Namespaces and Multi-Tenancy](#part-23--namespaces-and-multi-tenancy)
+24. [Environments: One Cluster or Many?](#part-24--environments-one-cluster-or-many)
+25. [Autoscaling and Capacity](#part-25--autoscaling-and-capacity)
+26. [Cluster Lifecycle Operations](#part-26--cluster-lifecycle-operations)
+27. [Backup, Disaster Recovery, and Business Continuity](#part-27--backup-disaster-recovery-and-business-continuity)
+28. [Multi-Cluster and Multi-Region](#part-28--multi-cluster-and-multi-region)
+29. [Cost](#part-29--cost)
+30. [AI/ML and GPU Workloads](#part-30--aiml-and-gpu-workloads)
+31. [Platform Engineering: Building the Golden Path](#part-31--platform-engineering-building-the-golden-path)
 
 **Reference**
-32. [The Build-Out Order](#part-32-the-build-out-order)
-33. [Command Reference](#part-33-command-reference)
-34. [Tooling Landscape](#part-34-tooling-landscape)
-35. [Anti-Patterns](#part-35-anti-patterns)
-36. [Glossary](#part-36-glossary)
+32. [The Build-Out Order](#part-32--the-build-out-order)
+33. [Command Reference](#part-33--command-reference)
+34. [Tooling Landscape](#part-34--tooling-landscape)
+35. [Anti-Patterns](#part-35--anti-patterns)
+36. [Glossary](#part-36--glossary)
 
 **Advanced and specialized topics**
 
-37. [Advanced Scheduling](#part-37-advanced-scheduling)
-38. [Ephemeral Storage, Node Pressure, and Resource Exhaustion](#part-38-ephemeral-storage-node-pressure-and-resource-exhaustion)
-39. [Node Lifecycle and Maintenance](#part-39-node-lifecycle-and-maintenance)
-40. [etcd and Control Plane Health](#part-40-etcd-and-control-plane-health)
-41. [API Priority and Fairness](#part-41-api-priority-and-fairness)
-42. [Advanced Networking: CIDR Planning, Dual-Stack, Session Affinity, and MTU](#part-42-advanced-networking-cidr-planning-dual-stack-session-affinity-and-mtu)
-43. [Server-Side Apply, Field Ownership, and Generated Manifests](#part-43-server-side-apply-field-ownership-and-generated-manifests)
-44. [Nodes: Runtimes, Isolation, and Heterogeneous Clusters](#part-44-nodes-runtimes-isolation-and-heterogeneous-clusters)
-45. [Platform Security Features](#part-45-platform-security-features)
-46. [Batch, Event-Driven, and Job Workloads](#part-46-batch-event-driven-and-job-workloads)
-47. [The Optional Serverless Layer](#part-47-the-optional-serverless-layer)
-48. [The Local Development Inner Loop](#part-48-the-local-development-inner-loop)
+37. [Advanced Scheduling](#part-37--advanced-scheduling)
+38. [Ephemeral Storage, Node Pressure, and Resource Exhaustion](#part-38--ephemeral-storage-node-pressure-and-resource-exhaustion)
+39. [Node Lifecycle and Maintenance](#part-39--node-lifecycle-and-maintenance)
+40. [etcd and Control Plane Health](#part-40--etcd-and-control-plane-health)
+41. [API Priority and Fairness](#part-41--api-priority-and-fairness)
+42. [Advanced Networking: CIDR Planning, Dual-Stack, Session Affinity, and MTU](#part-42--advanced-networking-cidr-planning-dual-stack-session-affinity-and-mtu)
+43. [Server-Side Apply, Field Ownership, and Generated Manifests](#part-43--server-side-apply-field-ownership-and-generated-manifests)
+44. [Nodes: Runtimes, Isolation, and Heterogeneous Clusters](#part-44--nodes-runtimes-isolation-and-heterogeneous-clusters)
+45. [Platform Security Features](#part-45--platform-security-features)
+46. [Batch, Event-Driven, and Job Workloads](#part-46--batch-event-driven-and-job-workloads)
+47. [The Optional Serverless Layer](#part-47--the-optional-serverless-layer)
+48. [The Local Development Inner Loop](#part-48--the-local-development-inner-loop)
 
 ---
 
@@ -138,7 +138,7 @@ Where a topic is genuinely contested or the ecosystem is split, the guide says s
 
 ## 1.1 Who this guide is for, and how to read it
 
-This guide is written for anyone who has to run Kubernetes: a developer deploying their first service, an ops engineer inheriting a cluster, an architect deciding whether to adopt it, or a student learning the ecosystem. It assumes **no prior Kubernetes knowledge** and explains every term where it is first used rather than assuming it. A consolidated lookup list lives in [Part 36 — Glossary](#part-36-glossary) for readers who hit an unfamiliar word and want the short version.
+This guide is written for anyone who has to run Kubernetes: a developer deploying their first service, an ops engineer inheriting a cluster, an architect deciding whether to adopt it, or a student learning the ecosystem. It assumes **no prior Kubernetes knowledge** and explains every term where it is first used rather than assuming it. A consolidated lookup list lives in [Part 36 — Glossary](#part-36--glossary) for readers who hit an unfamiliar word and want the short version.
 
 It is organized so that it can be read straight through, top to bottom, as a course — and also used as a reference. Parts 1–5 are foundations and are worth reading in order. Parts 6 onward are largely independent and can be jumped to. Each part that builds on an earlier one says so explicitly.
 
@@ -157,13 +157,13 @@ Kubernetes orchestrates containers, so the container model has to come first. Re
 - **cgroups (control groups)** control what a process can *use* — CPU time, memory, disk I/O, and how many processes it may create. cgroups are where a container's CPU and memory limits live, and how they are enforced. Two consequences matter later: exceeding **CPU** gets a process *throttled* (slowed, not killed), whereas exceeding **memory** triggers the kernel's out-of-memory killer to terminate it. The kill is performed by the kernel's OOM killer, not by cgroups themselves — cgroups meter usage and apply the limit, and the OOM killer is what acts when memory cannot be reclaimed. (Linux has two generations of this interface, cgroup v1 and v2. Kubernetes has supported only v2 for several releases now, and all supported container runtimes default to it, so on any modern cluster you will only encounter v2.)
 - **Capabilities and seccomp** control what a process is *allowed to do* even as root — dropping `CAP_NET_ADMIN`, for example, prevents it from reconfiguring the network, and seccomp filters which system calls it may make at all.
 
-Because these are kernel features rather than emulation, containers start in milliseconds (a VM takes seconds to minutes) and are cheap enough to run hundreds per host. That cheapness is what makes the orchestration problem in 1.4 worth solving — and also why containers are a *weaker* isolation boundary than VMs, which matters in [Part 18](#part-18-security) and [Part 23](#part-23-namespaces-and-multi-tenancy).
+Because these are kernel features rather than emulation, containers start in milliseconds (a VM takes seconds to minutes) and are cheap enough to run hundreds per host. That cheapness is what makes the orchestration problem in 1.4 worth solving — and also why containers are a *weaker* isolation boundary than VMs, which matters in [Part 18](#part-18--security) and [Part 23](#part-23--namespaces-and-multi-tenancy).
 
 **An image is the packaged filesystem and metadata a container starts from.** It is built as a stack of **layers**, where each layer is a filesystem diff produced by one build instruction. Layers are content-addressed and shared: if ten images all start from the same base layer, that layer is stored and downloaded once. This is why image builds are fast when only the last layer changed, and why "put your dependency installation before your source copy" is standard advice in a Dockerfile — anything that changes invalidates every layer after it.
 
 The standard for images is the **OCI (Open Container Initiative) image specification**, and the runtime interface is the **CRI (Container Runtime Interface)**. Kubernetes does not build or run images itself; it talks to a container runtime — **containerd** or **CRI-O** in practice — through CRI. Historically Kubernetes used Docker as its runtime, via an adapter called `dockershim`; that adapter was removed in Kubernetes 1.24, which is what older migration notes mean by "Docker is not supported anymore." Images are still routinely built with Docker or BuildKit — that part was never in question — but the *runtime on the node* is now containerd or CRI-O. The practical consequence for you: `docker ps` on a node shows nothing about Kubernetes workloads, so you inspect them with `kubectl` or `crictl` instead.
 
-**A registry** (Docker Hub, GitHub Container Registry, Amazon ECR, Google Artifact Registry, Harbor) stores and distributes images. An image reference has three parts — `registry.example.com/team/api:1.14.2` is registry + repository + tag. Tags are mutable pointers and therefore unreliable for production (someone can repoint `1.14.2` at different content tomorrow). A **digest** — `registry.example.com/team/api@sha256:abc123...` — is a cryptographic hash of the image content and is immutable. Pinning by digest is the reproducible choice; see [Part 22](#part-22-cicd-the-actual-workflow).
+**A registry** (Docker Hub, GitHub Container Registry, Amazon ECR, Google Artifact Registry, Harbor) stores and distributes images. An image reference has three parts — `registry.example.com/team/api:1.14.2` is registry + repository + tag. Tags are mutable pointers and therefore unreliable for production (someone can repoint `1.14.2` at different content tomorrow). A **digest** — `registry.example.com/team/api@sha256:abc123...` — is a cryptographic hash of the image content and is immutable. Pinning by digest is the reproducible choice; see [Part 22](#part-22--cicd-the-actual-workflow).
 
 ## 1.3 What a container does not solve
 
@@ -194,7 +194,7 @@ One terminology trap: the watch notifications above are not the same thing as th
 
 **Distributed state machine — many small loops sharing one source of truth.** Dozens of independent **controllers** each own a slice of the world: one manages Deployments, another ReplicaSets, another nodes, another routes. They do not call each other. They read from and write to one central API server, communicating only by changing shared state. This is architecturally similar to a database with triggers, and it is why Kubernetes can be extended to manage things its authors never imagined — a controller for PostgreSQL, for certificates, for DNS records, for cloud load balancers — without modifying Kubernetes itself. [Part 5.4](#54-extending-the-api-crds-controllers-operators-webhooks) shows how to add one.
 
-The practical payoff of all three properties together: **deployment logic becomes versionable, reviewable, diffable, and revertable.** A `git revert` becomes a deployment mechanism, because the declaration lives in git and the controller will re-satisfy it. That single property is what makes GitOps ([Part 21](#part-21-gitops)) possible, and it is the strongest reason to prefer Kubernetes over hand-rolled automation even at small scale.
+The practical payoff of all three properties together: **deployment logic becomes versionable, reviewable, diffable, and revertable.** A `git revert` becomes a deployment mechanism, because the declaration lives in git and the controller will re-satisfy it. That single property is what makes GitOps ([Part 21](#part-21--gitops)) possible, and it is the strongest reason to prefer Kubernetes over hand-rolled automation even at small scale.
 
 ## 1.5 How it differs from plain Docker / Compose
 
@@ -224,17 +224,17 @@ Three conceptual jumps cause most of the confusion:
 
 **Jump 2 — pods are mortal, and their identities are not stable.** A pod is not a durable object. It receives a new IP address every time it starts. It is destroyed and recreated on every deploy, on node maintenance, and whenever the node it lives on runs short of resources. Nothing may depend on a pod's IP or name persisting. This is precisely why **Services** exist: a Service is a stable virtual IP and DNS name that always points at whatever pods are currently healthy and match its label selector. Anything that treats pods as long-lived — writing state to the container filesystem, hardcoding an IP, expecting a specific pod to exist tomorrow — will break, and it will break at the least convenient time.
 
-**Jump 3 — the operational model is "observe and reconcile," not "log in and fix."** There is no supported workflow of SSHing into a machine and editing configuration. Instead, an operator inspects declared state, observed state, and the event stream, determines which layer disagrees, and changes the *declaration* (or fixes the underlying cause). This is a different skill from traditional server administration, and it is the one skill that most repays investment; [Part 20](#part-20-debugging) is devoted to it.
+**Jump 3 — the operational model is "observe and reconcile," not "log in and fix."** There is no supported workflow of SSHing into a machine and editing configuration. Instead, an operator inspects declared state, observed state, and the event stream, determines which layer disagrees, and changes the *declaration* (or fixes the underlying cause). This is a different skill from traditional server administration, and it is the one skill that most repays investment; [Part 20](#part-20--debugging) is devoted to it.
 
 ## 1.6 What Kubernetes is not
 
 Expectations matter as much as capabilities, because most Kubernetes disappointments come from expecting something it never claimed to provide.
 
-- **Not a platform-as-a-service.** Kubernetes supplies primitives, not a finished platform. There is no built-in CI system, no built-in image registry, no built-in logging or dashboard product, no built-in database service. Everything beyond the primitives is assembled by the operator — which is exactly why [Part 31](#part-31-platform-engineering-building-the-golden-path) exists.
-- **Not a database.** Kubernetes schedules processes; it does not provide data guarantees. Databases can run on it via **StatefulSets** and **operators**, and that is a legitimate choice in specific circumstances, but "can" and "should" differ. See [Part 17](#part-17-databases-and-stateful-data).
+- **Not a platform-as-a-service.** Kubernetes supplies primitives, not a finished platform. There is no built-in CI system, no built-in image registry, no built-in logging or dashboard product, no built-in database service. Everything beyond the primitives is assembled by the operator — which is exactly why [Part 31](#part-31--platform-engineering-building-the-golden-path) exists.
+- **Not a database.** Kubernetes schedules processes; it does not provide data guarantees. Databases can run on it via **StatefulSets** and **operators**, and that is a legitimate choice in specific circumstances, but "can" and "should" differ. See [Part 17](#part-17--databases-and-stateful-data).
 - **Not a fix for application design.** If an application takes four minutes to become ready, ignores `SIGTERM` (the signal Kubernetes sends to ask a process to shut down cleanly), is not **idempotent** (meaning that performing the same operation twice has the same effect as performing it once), and cannot run two copies at once, Kubernetes will faithfully amplify those problems. Applications must be *designed to be orchestrated*: stateless where possible, fast to start, graceful on shutdown, tolerant of dependencies disappearing.
-- **Not a security boundary by default.** A namespace is not a virtual machine. Isolation is assembled from RBAC, NetworkPolicy, Pod Security Admission, admission policy, runtime security, and the kernel features from 1.2. Multi-tenant clusters in particular require deliberate work ([Part 23](#part-23-namespaces-and-multi-tenancy)).
-- **Not a reverse proxy, load balancer, or firewall.** Kubernetes standardizes how to *ask* for those things — through Service, Gateway API, and NetworkPolicy objects — but the actual proxying, balancing, and filtering is performed by software that must be installed and operated ([Parts 10–13](#part-10-load-balancing-the-four-layers)). This distinction surprises people more than any other, and it is why "I created a Service, why is nothing reachable from the internet?" is such a common early question.
+- **Not a security boundary by default.** A namespace is not a virtual machine. Isolation is assembled from RBAC, NetworkPolicy, Pod Security Admission, admission policy, runtime security, and the kernel features from 1.2. Multi-tenant clusters in particular require deliberate work ([Part 23](#part-23--namespaces-and-multi-tenancy)).
+- **Not a reverse proxy, load balancer, or firewall.** Kubernetes standardizes how to *ask* for those things — through Service, Gateway API, and NetworkPolicy objects — but the actual proxying, balancing, and filtering is performed by software that must be installed and operated ([Parts 10–13](#part-10--load-balancing-the-four-layers)). This distinction surprises people more than any other, and it is why "I created a Service, why is nothing reachable from the internet?" is such a common early question.
 
 ---
 
@@ -284,7 +284,7 @@ The **control plane** is the decision-making layer. It stores desired state, wat
 | **etcd** | The cluster's database: a distributed, consistent key-value store. All desired and observed state lives here. | **The most important thing to back up.** Losing etcd means losing the cluster's memory of itself. It requires a **quorum** — a majority of its members must agree before accepting a write — which is why it is run with an odd number of members (3 tolerates 1 failure, 5 tolerates 2) and why 2 members is strictly worse than 1 or 3. |
 | **kube-scheduler** | Decides which node each new pod runs on (detail in 2.8). | When pods sit in `Pending`, the scheduler's decisions — or its refusal to decide — are the explanation, and the reason appears in pod events. |
 | **kube-controller-manager** | Runs the built-in control loops: the Deployment controller, ReplicaSet controller, Node controller, Job controller, EndpointSlice controller, and dozens more. | This is where "reconciliation" physically happens. It is one binary containing many independent loops. |
-| **cloud-controller-manager** | Translates Kubernetes objects into cloud-provider actions: provisioning a load balancer for a `Service` of type `LoadBalancer`, attaching disks, managing node lifecycle and routes. | Present only in cloud clusters. It is the component that makes `type: LoadBalancer` do anything, and its absence is why that Service type hangs with no address on bare metal ([Part 12.2](#step-2-check-that-a-loadbalancer-can-actually-get-an-ip)). |
+| **cloud-controller-manager** | Translates Kubernetes objects into cloud-provider actions: provisioning a load balancer for a `Service` of type `LoadBalancer`, attaching disks, managing node lifecycle and routes. | Present only in cloud clusters. It is the component that makes `type: LoadBalancer` do anything, and its absence is why that Service type hangs with no address on bare metal ([Part 12.2](#step-2--check-that-a-loadbalancer-can-actually-get-an-ip)). |
 | **DNS provider** (usually CoreDNS) | Serves names like `api.prod.svc.cluster.local` to every pod. | Runs as an ordinary workload rather than as part of the control plane. Be careful with the implication: a query goes to the `kube-dns` Service and is forwarded to a **CoreDNS pod**, so name resolution *is* pod-to-pod traffic. The accurate relationship is that **DNS depends on pod networking, not the reverse** — a pod can reach another pod by IP even when DNS is broken, which is why "does it work by IP?" is such a useful debugging question ([Part 9.3](#93-dns-coredns)). |
 
 **High availability.** With three control-plane nodes, each runs its own API server, scheduler, and controller-manager plus one etcd member. The API servers sit behind a load balancer; the scheduler and controller-manager use leader election so only one instance is active at a time (the others are hot standbys). This is why a control plane can lose one machine without downtime, and why a single-control-plane cluster is a development-only configuration: losing that machine means no scheduling, no reconciliation, and no API access until it returns.
@@ -301,7 +301,7 @@ Every node, worker or control plane, runs these two components. They are why a n
 
 **CNI plugin** — a program on each node that assigns pod IP addresses and wires up connectivity. The CNI is what makes the flat pod network real ([Part 9.2](#92-the-cni-layer)). It is usually deployed as a DaemonSet, meaning one pod per node.
 
-**CSI node plugin** — the per-node half of a storage driver, responsible for attaching and mounting volumes on that machine ([Part 16](#part-16-storage)). Also typically a DaemonSet.
+**CSI node plugin** — the per-node half of a storage driver, responsible for attaching and mounting volumes on that machine ([Part 16](#part-16--storage)). Also typically a DaemonSet.
 
 So a typical worker node is running: the kubelet and container runtime as native services, plus several DaemonSet pods (CNI, CSI node plugin, log collector, metrics agent, and any security agent). This is worth remembering when budgeting node capacity: **DaemonSets consume resources on every node**, and they are usually excluded from the accounting that "how much room do I have?" calculations show.
 
@@ -580,7 +580,7 @@ It is worth being precise, though, because the sweeping version of this claim ("
 - The **kubelet calls out** to the CRI runtime, the CNI plugin, and the CSI driver on its node.
 - **Controllers call cloud APIs** to create load balancers, attach disks, and manage DNS.
 
-The safe formulation: **controller-to-controller coordination is purely through shared state; components still have direct, often synchronous dependencies on plugins, webhooks, and external APIs.** When something is broken, the productive question is "at which arrow did the chain stop?" — that question, asked systematically, resolves the large majority of Kubernetes problems, and it is the method [Part 20](#part-20-debugging) formalizes.
+The safe formulation: **controller-to-controller coordination is purely through shared state; components still have direct, often synchronous dependencies on plugins, webhooks, and external APIs.** When something is broken, the productive question is "at which arrow did the chain stop?" — that question, asked systematically, resolves the large majority of Kubernetes problems, and it is the method [Part 20](#part-20--debugging) formalizes.
 
 ---
 
@@ -923,7 +923,7 @@ Objects reference each other:
 
 ## 6.1 Pods
 
-A **pod** is the smallest deployable unit in Kubernetes: one or more containers that are always placed on the same node, share a network namespace (and therefore an IP address and a port space), and can share storage volumes. [Part 1.5](#15-how-it-differs-from-plain-docker-compose) explains why the pod — rather than the container — is the unit.
+A **pod** is the smallest deployable unit in Kubernetes: one or more containers that are always placed on the same node, share a network namespace (and therefore an IP address and a port space), and can share storage volumes. [Part 1.5](#15-how-it-differs-from-plain-docker--compose) explains why the pod — rather than the container — is the unit.
 
 Pods are almost never created directly. Instead an operator declares a **controller** — an object whose job is to create and maintain pods — and the controller creates them. The reason is the reconciliation model from [Part 1.4](#14-the-orchestration-problem-stated-precisely): a bare pod that dies is simply gone, because nothing owns it and nothing will recreate it. A pod created by a controller is continuously maintained. The four workload controllers are a Deployment (6.2), a StatefulSet (6.3), a DaemonSet (6.4), and a Job or CronJob (6.5).
 
@@ -1017,7 +1017,7 @@ spec:
 
 **The probes are not decoration.** Getting them right is the difference between a self-healing service and an outage:
 
-- **Startup probe** — asks "has the application finished starting?" While it is failing, the liveness and readiness probes are **disabled**, so a slow boot cannot be mistaken for a hang. Once it succeeds it stops running and the other two take over. Use it for anything with a long or unpredictable warm-up (a JVM loading classes, a service building caches). The startup budget is `periodSeconds × failureThreshold` — the example in [Part 6.2](#62-deployment-stateless-apps) allows 60 × 5s = 5 minutes — and note that when the startup probe *does* exhaust its budget, the container is killed under the restart policy, so this is a real boundary rather than a diagnostic. It exists because the alternative, a liveness `initialDelaySeconds`, is a guess: too short kills the app during boot, too long delays detecting a genuine hang later.
+- **Startup probe** — asks "has the application finished starting?" While it is failing, the liveness and readiness probes are **disabled**, so a slow boot cannot be mistaken for a hang. Once it succeeds it stops running and the other two take over. Use it for anything with a long or unpredictable warm-up (a JVM loading classes, a service building caches). The startup budget is `periodSeconds × failureThreshold` — the example in [Part 6.2](#62-deployment--stateless-apps) allows 60 × 5s = 5 minutes — and note that when the startup probe *does* exhaust its budget, the container is killed under the restart policy, so this is a real boundary rather than a diagnostic. It exists because the alternative, a liveness `initialDelaySeconds`, is a guess: too short kills the app during boot, too long delays detecting a genuine hang later.
 
 - **Readiness probe** — asks "should this pod receive traffic right now?" Failing it does **not** restart anything. What actually happens is more specific than "the pod is removed from endpoints," and the detail matters when you debug it:
 
@@ -1133,7 +1133,7 @@ For migration jobs in a GitOps world, use **Argo CD sync hooks/waves** so migrat
 
 ## 6.6 Resources, QoS, and scheduling
 
-This section is the practical counterpart to [Part 2.10](#210-node-pressure-qos-and-eviction), which explains *why* nodes evict pods and defines the QoS classes. Advanced placement — spreading across failure domains, correcting drift over time, and reserving capacity — is covered in [Part 37](#part-37-advanced-scheduling); the storage resource that causes the most node evictions is covered in [Part 38](#part-38-ephemeral-storage-node-pressure-and-resource-exhaustion). Here is how to declare resources correctly and how to influence where pods land.
+This section is the practical counterpart to [Part 2.10](#210-node-pressure-qos-and-eviction), which explains *why* nodes evict pods and defines the QoS classes. Advanced placement — spreading across failure domains, correcting drift over time, and reserving capacity — is covered in [Part 37](#part-37--advanced-scheduling); the storage resource that causes the most node evictions is covered in [Part 38](#part-38--ephemeral-storage-node-pressure-and-resource-exhaustion). Here is how to declare resources correctly and how to influence where pods land.
 
 **Requests vs limits** — the two numbers every container should have, and the distinction that causes the most confusion:
 
@@ -2447,7 +2447,7 @@ Common StorageClasses people define: `fast-ssd` (gp3/premium SSD, RWO), `standar
 
 **What not to do:** don't use `hostPath` (pins your pod to one node, breaks on rescheduling, is a security hole), don't use `emptyDir` for anything you need to survive a restart (it's deleted with the pod), and don't assume a PVC is a backup.
 
-**Ephemeral storage is a schedulable resource too.** Everything in this part concerns persistent volumes; the *other* kind of storage — container writable layers, logs, and `emptyDir` — is covered in [Part 38](#part-38-ephemeral-storage-node-pressure-and-resource-exhaustion).
+**Ephemeral storage is a schedulable resource too.** Everything in this part concerns persistent volumes; the *other* kind of storage — container writable layers, logs, and `emptyDir` — is covered in [Part 38](#part-38--ephemeral-storage-node-pressure-and-resource-exhaustion).
 
 **One more thing about rescheduling:** a pod with an RWO cloud disk is bound to the zone of that disk. Node loss in that zone means the pod cannot start elsewhere until the volume is available. This is a real availability constraint for stateful workloads, and it's why database replicas must be spread across zones with their own volumes (Part 17).
 
@@ -2632,7 +2632,7 @@ spec:
 - **Secrets encryption + external secret management** (Part 8). Not optional in production.
 - **Supply chain for manifests too** — Argo CD 3.5 added internal mTLS and source integrity verification. If someone can commit to your GitOps repo, they can deploy to production; treat that repo's permissions accordingly (branch protection, signed commits, required reviews).
 
-**Platform-level security mechanisms** — seccomp/AppArmor/SELinux configuration, ServiceAccount token handling, Pod Certificates, audit log policy, and the runtime-security baseline — are covered in [Part 45](#part-45-platform-security-features).
+**Platform-level security mechanisms** — seccomp/AppArmor/SELinux configuration, ServiceAccount token handling, Pod Certificates, audit log policy, and the runtime-security baseline — are covered in [Part 45](#part-45--platform-security-features).
 
 ## 18.5 A realistic sequencing
 
@@ -2870,7 +2870,7 @@ journalctl -u kubelet -n 200 --no-pager      # on the node
 - **`popeye`** — cluster hygiene/sanity scanning (dangling services, missing probes, unused configmaps, empty endpoints). Cheap CI quality gate.
 - **Proxy admin endpoints** — Envoy `config_dump`/`clusters`/`stats`, NGINX `nginx -T`, Traefik healthcheck. Learn these; they answer proxy questions definitively.
 
-**When the cluster itself feels slow rather than a workload being broken**, the problem is likely control-plane overload — see [Part 40.4](#404-control-plane-capacity-and-overload) and [Part 41](#part-41-api-priority-and-fairness).
+**When the cluster itself feels slow rather than a workload being broken**, the problem is likely control-plane overload — see [Part 40.4](#404-control-plane-capacity-and-overload) and [Part 41](#part-41--api-priority-and-fairness).
 
 ## 20.6 The mental discipline
 
@@ -3340,7 +3340,7 @@ Useful for right-sizing: run VPA in `updateMode: Off` (recommendation-only) to g
 - **GKE Autopilot / AKS automatic / EKS Auto Mode** — the provider handles node provisioning entirely.
 - **Overprovisioning pattern** — run a low-priority "pause" Deployment with N replicas; when real pods arrive, the pause pods are preempted and the autoscaler immediately has capacity to fill. This removes the 2–5 minute node-provisioning delay from your critical path. Standard trick, worth using for latency-sensitive services.
 
-Batch and event-driven workloads scale on different signals entirely (queue depth, not CPU), which is covered in [Part 46](#part-46-batch-event-driven-and-job-workloads).
+Batch and event-driven workloads scale on different signals entirely (queue depth, not CPU), which is covered in [Part 46](#part-46--batch-event-driven-and-job-workloads).
 
 ## 25.4 Real capacity planning
 
@@ -3404,7 +3404,7 @@ kubectl drain node-1 --ignore-daemonsets --delete-emptydir-data --force   # --fo
 kubectl uncordon node-1
 ```
 
-This is the short version; the full anatomy of a safe drain, why drains hang, and permanent node removal are in [Part 39](#part-39-node-lifecycle-and-maintenance).
+This is the short version; the full anatomy of a safe drain, why drains hang, and permanent node removal are in [Part 39](#part-39--node-lifecycle-and-maintenance).
 
 Common blockers: **a PDB preventing eviction** (check whether it's `minAvailable == replicas`), **emptyDir data loss** warnings, **`local-path` volumes / hostPath** pinning pods, and **StatefulSet pods**, where what actually blocks or breaks is either a PDB preventing eviction, or the application being unable to re-form quorum after a member moves.
 
