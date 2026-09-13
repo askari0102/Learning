@@ -19,9 +19,9 @@ It can be read straight through as a course — Parts 1–5 are foundations and 
 | **Workload** | A generic word for an application running on the cluster — a web API, a batch job, a database. Not a Kubernetes object type. |
 | **Manifest** | A YAML or JSON file declaring Kubernetes objects. [Part 5.1](#51-objects-kinds-and-the-shape-of-everything) |
 | **Namespace** | A scope for names and a unit of policy — the primary way work is partitioned inside a cluster. [Part 23](#part-23--namespaces-and-multi-tenancy) |
-| **Ingress** | The legacy Kubernetes API for routing external HTTP traffic to services. Superseded by Gateway API. [Part 12.3](#123-gateway-api-vs-ingress-the-honest-comparison) |
+| **Ingress** | The long-standing (feature-frozen but still supported and GA) Kubernetes API for routing external HTTP traffic to services. Gateway API is the successor for new routing; Ingress remains supported. [Part 12.3](#123-gateway-api-vs-ingress-the-honest-comparison) |
 | **Gateway API** | The modern, portable set of objects describing how traffic enters the cluster, replacing Ingress. [Part 12](#part-12--the-gateway-api-in-full) |
-| **Reverse proxy** | Software that sits in front of servers, accepting requests and routing them to backends. Every cluster has at least one. [Part 11](#part-11--reverse-proxies-in-full) |
+| **Reverse proxy** | Software that sits in front of servers, accepting requests and routing them to backends. Installed separately — an empty cluster has none until you install a Gateway controller or ingress implementation. [Part 11](#part-11--reverse-proxies-in-full) |
 | **HPA** | Horizontal Pod Autoscaler: adds or removes pod replicas based on metrics such as CPU. [Part 25.1](#251-hpa) |
 | **GitOps** | Keeping the cluster's desired state in git and having a controller in the cluster continuously reconcile reality to it. [Part 21](#part-21--gitops) |
 | **cert-manager** | A controller that obtains and renews TLS certificates automatically. [Part 14](#part-14--tls-and-certificates) |
@@ -45,7 +45,7 @@ Where a topic is genuinely contested or the ecosystem is split, the guide says s
 | Thing | Current | Notes |
 |---|---|---|
 | **Kubernetes** | **1.37** ("Garhwal", 2026-08-26) | 1.36 and 1.35 also in support (N-2 policy, ~14 months each). **1.34 EOL 2026-10-27.** |
-| **Gateway API** | **v1.6** (2026-08-03) | v1.5 (released 2026-02-27) moved features to Stable; **v1.6 graduated TCPRoute + UDPRoute to Standard**. |
+| **Gateway API** | **v1.6** (released 2026-06-30, blogged 2026-08-03) | v1.5 (released 2026-02-27) moved features to Stable; **v1.6 graduated TCPRoute + UDPRoute to Standard**. TLSRoute remains Experimental. |
 | **Envoy Gateway** | v1.9.x | Reference neutral Envoy-based implementation. Check the compatibility matrix before pinning. |
 | **Cilium** | 1.20.x | eBPF dataplane, Gateway API, LB-IPAM, multi-pool IPAM stable. Cilium supports the three most recent minors, so 1.19 is still supported; 1.19.7 is its latest patch (1.19 EOL comes with 1.21). |
 | **Istio** | 1.31 | Ambient mode (sidecar-less mesh) has been GA since **1.24** (Nov 2024). |
@@ -57,8 +57,8 @@ Where a topic is genuinely contested or the ecosystem is split, the guide says s
 **Recent changes that affect what is worth building today:**
 
 - **Ingress NGINX retirement** — the de-facto default ingress controller is gone. Gateway API is the direction, and there is an official **Ingress2Gateway** migration tool (1.0 released Mar 2026). [Part 12.4](#124-migrating-from-ingress)
-- **`Service` `externalIPs` deprecated in 1.36.** Upstream's guidance is that all users should migrate away from it, toward a load-balancer controller or a Gateway API implementation. It is deprecated rather than removed, so existing manifests still work — but it is on the way out and cannot support dual-stack.
-- **In-place Pod resize is Stable** (1.35) and **HPA scale-to-zero is Beta** (1.37) — changing a pod's CPU/memory without restarting it, and scaling a workload to zero replicas, are now supported.
+- **`Service` `externalIPs` deprecated in 1.36.** Upstream's guidance is that all users should migrate away from it, toward a load-balancer controller or a Gateway API implementation. It is deprecated rather than removed, so existing manifests still work — but it is on the way out. (The deprecation reason is security — CVE-2020-8554 lets untrusted users claim arbitrary IPs for MITM — not dual-stack; the field is a string list and can hold v4/v6.)
+- **In-place Pod resize is Stable** (1.35) and **HPA scale-to-zero is Beta** (1.37, `minReplicas: 0` only with object/external metrics — CPU/memory-only HPAs are rejected and need a wake path such as KEDA) — changing a pod's CPU without restarting it (memory resizes restart the container by default), and scaling suitable workloads to zero replicas, are now supported.
 - **DRA (Dynamic Resource Allocation) reached GA in 1.34** and continues to expand. It is the modern way to request GPUs, NICs, and FPGAs, replacing the older integer-resource approach. [Part 30.3](#303-gpu-resource-management--dra-is-the-modern-answer)
 - **AI workloads are now first-class**: the **AI Gateway Working Group** (Mar 2026) and the **Gateway API Inference Extension** exist specifically for routing LLM inference traffic (KV-cache-aware, prefix-aware, model-aware routing). [Part 30.1](#301-inference-serving-models)
 - **Pod Certificates and Cluster Trust Bundles** (1.37) give workloads API-managed cryptographic identities, reducing the need to distribute long-lived secrets for service-to-service authentication. [Part 8.2](#82-secrets-and-why-the-default-is-not-secure)
@@ -154,7 +154,7 @@ Kubernetes orchestrates containers, so the container model has to come first. Re
 **A container is a process on a Linux host that has been fenced off so it cannot see or disturb most of the rest of the machine.** It is not a virtual machine. There is no second kernel and no hardware emulation: the container runs the host's kernel directly, and the isolation comes from three Linux kernel features working together:
 
 - **Namespaces** control what a process can *see*. A process in its own PID namespace sees only its own processes; in its own network namespace it has its own network interfaces, IP addresses, and ports; a mount namespace gives it its own view of the filesystem; there are also user, UTS (hostname), and IPC namespaces. This is why two containers can both listen on port 8080 without conflict — they are in different network namespaces.
-- **cgroups (control groups)** control what a process can *use* — CPU time, memory, disk I/O, and how many processes it may create. cgroups are where a container's CPU and memory limits live, and how they are enforced. Two consequences matter later: exceeding **CPU** gets a process *throttled* (slowed, not killed), whereas exceeding **memory** triggers the kernel's out-of-memory killer to terminate it. The kill is performed by the kernel's OOM killer, not by cgroups themselves — cgroups meter usage and apply the limit, and the OOM killer is what acts when memory cannot be reclaimed. (Linux has two generations of this interface, cgroup v1 and v2. Kubernetes has supported only v2 for several releases now, and all supported container runtimes default to it, so on any modern cluster you will only encounter v2.)
+- **cgroups (control groups)** control what a process can *use* — CPU time, memory, disk I/O, and how many processes it may create. cgroups are where a container's CPU and memory limits live, and how they are enforced. Two consequences matter later: exceeding **CPU** gets a process *throttled* (slowed, not killed), whereas exceeding **memory** triggers the kernel's out-of-memory killer to terminate it. The kill is performed by the kernel's OOM killer, not by cgroups themselves — cgroups meter usage and apply the limit, and the OOM killer is what acts when memory cannot be reclaimed. (Linux has two generations of this interface, cgroup v1 and v2. cgroup v2 is the default on modern distributions and is required for some features such as MemoryQoS (v2 GA since 1.25). cgroup v1 was moved to maintenance mode in 1.31 and deprecated in 1.35 (kubelet `failCgroupV1` defaults to true in 1.37); nodes can still run on v1 with `failCgroupV1: false`, so older nodes may still use v1. Container runtimes (containerd >=1.4, CRI-O >=1.20) follow the host rather than forcing v2.)
 - **Capabilities and seccomp** control what a process is *allowed to do* even as root — dropping `CAP_NET_ADMIN`, for example, prevents it from reconfiguring the network, and seccomp filters which system calls it may make at all.
 
 Because these are kernel features rather than emulation, containers start in milliseconds (a VM takes seconds to minutes) and are cheap enough to run hundreds per host. That cheapness is what makes the orchestration problem in 1.4 worth solving — and also why containers are a *weaker* isolation boundary than VMs, which matters in [Part 18](#part-18--security) and [Part 23](#part-23--namespaces-and-multi-tenancy).
@@ -297,13 +297,13 @@ Every node, worker or control plane, runs these two components. They are why a n
 
 **Container runtime** — the program that actually creates and runs containers, reached through the **CRI** (Container Runtime Interface). In practice this is **containerd** or **CRI-O**. The kubelet does not implement containerization; it delegates. ([Part 1.2](#12-containers-and-images-briefly-for-readers-who-have-not-used-docker) covers images and runtimes.)
 
-**kube-proxy** (somewhat optional now) — the component that historically implemented Service networking on each node by programming packet-forwarding rules so that traffic to a Service's virtual IP reaches a backing pod. It runs in one of several modes (iptables, nftables, or **IPVS** — IP Virtual Server, the kernel's L4 load balancer). In many modern clusters it is **removed entirely** and replaced by eBPF-based service handling in the CNI — Cilium calls this "kube-proxy replacement." Which one is in use matters for debugging, because the place to look for Service routing problems differs ([Part 20.3](#203-service-and-networking-debugging)).
+**kube-proxy** (somewhat optional now) — the component that historically implemented Service networking on each node by programming packet-forwarding rules so that traffic to a Service's virtual IP reaches a backing pod. It runs in one of several modes — `iptables` (the default), `ipvs` (selected with `--proxy-mode=ipvs`; IP Virtual Server, the kernel's L4 load balancer), or `nftables` (Beta, feature-gated, ~1.31+; the old `userspace` mode is removed). In many modern clusters it is **removed entirely** and replaced by eBPF-based service handling in the CNI — Cilium calls this "kube-proxy replacement." Which one is in use matters for debugging, because the place to look for Service routing problems differs ([Part 20.3](#203-service-and-networking-debugging)).
 
-**CNI plugin** — a program on each node that assigns pod IP addresses and wires up connectivity. The CNI is what makes the flat pod network real ([Part 9.2](#92-the-cni-layer)). It is usually deployed as a DaemonSet, meaning one pod per node.
+**CNI plugin** — the binary on each node (`/opt/cni/bin`, invoked by the kubelet/container runtime) that assigns pod IP addresses and wires up connectivity, plus its per-node agent (e.g. `cilium-agent`, `calico-node`), which is what is usually deployed as a DaemonSet, meaning one agent pod per node. The CNI is what makes the flat pod network real ([Part 9.2](#92-the-cni-layer)).
 
 **CSI node plugin** — the per-node half of a storage driver, responsible for attaching and mounting volumes on that machine ([Part 16](#part-16--storage)). Also typically a DaemonSet.
 
-So a typical worker node is running: the kubelet and container runtime as native services, plus several DaemonSet pods (CNI, CSI node plugin, log collector, metrics agent, and any security agent). This is worth remembering when budgeting node capacity: **DaemonSets consume resources on every node**, and they are usually excluded from the accounting that "how much room do I have?" calculations show.
+So a typical worker node is running: the kubelet and container runtime as native services, plus several DaemonSet pods (CNI, CSI node plugin, log collector, metrics agent, and any security agent). This is worth remembering when budgeting node capacity: **DaemonSets consume resources on every node**, and they *are* included in the accounting that "how much room do I have?" calculations show (`kubectl describe node` Allocated resources and the scheduler's allocatable budget count DaemonSet requests).
 
 ## 2.5 Labels, selectors, and node roles in practice
 
@@ -318,7 +318,7 @@ topology.kubernetes.io/zone: eu-west-1a
 node.kubernetes.io/instance-type: m6i.2xlarge
 ```
 
-These labels are how pods express *where* they are willing to run, and they are the foundation of scheduling ([Part 6.6](#66-resources-qos-and-scheduling)). The zone and region labels in particular are used automatically by Kubernetes to spread pods across failure domains.
+These labels are how pods express *where* they are willing to run, and they are the foundation of scheduling ([Part 6.6](#66-resources-qos-and-scheduling)). The zone and region labels in particular are *inputs* for spreading — nothing spreads automatically; cross-zone spread needs `topologySpreadConstraints`, `podAffinity`/`podAntiAffinity`, or the weak node-level `SelectorSpread` default.
 
 ## 2.6 Taints and tolerations: how a node refuses work
 
@@ -406,7 +406,7 @@ kubectl describe pod <pod> | sed -n '/Events/,$p'
 
 The scheduler's job is to answer "which node?" for each newly created pod. It does this in two phases per candidate node.
 
-**Phase 1 — Filtering (predicates).** Every node is checked against hard requirements, and nodes that fail any check are eliminated. The checks include: does the node have enough allocatable CPU and memory for the pod's requests; do the node's taints all have matching tolerations; does the pod's node affinity/selector match the node's labels; are the pod's anti-affinity rules satisfiable; would placing the pod violate a topology spread constraint; is a required volume available in this node's zone; is the node cordoned; has the node reached its pod-count limit. Whatever remains is the candidate set. **If nothing remains, the pod stays `Pending` and the reasons are listed in its events** — which is why "read the events" is the correct first move for an unschedulable pod.
+**Phase 1 — Filtering (Filter plugins; `predicates` is the pre-1.19 term).** Every node is checked against hard requirements, and nodes that fail any check are eliminated. The checks include: does the node have enough allocatable CPU and memory for the pod's requests; do the node's taints all have matching tolerations; does the pod's node affinity/selector match the node's labels; are the pod's anti-affinity rules satisfiable; would placing the pod violate a topology spread constraint; is a required volume available in this node's zone; is the node cordoned; has the node reached its pod-count limit. Whatever remains is the candidate set. **If nothing remains, the pod stays `Pending` and the reasons are listed in its events** — which is why "read the events" is the correct first move for an unschedulable pod.
 
 **Phase 2 — Scoring.** Surviving nodes are ranked by soft preferences, and the default set is worth knowing because it is not what most people assume. It includes: preferring nodes that **already have the container image cached** (`ImageLocality`, faster start), respecting taint tolerations and node affinity preferences, **spreading** pods rather than packing them (`PodTopologySpread`), preferring nodes with more free resources (`NodeResourcesFit` with the default `LeastAllocated` strategy), and balancing resource types so one dimension is not exhausted.
 
@@ -481,15 +481,13 @@ Two definitions are needed first:
 - A **request** is the amount of CPU or memory the pod is guaranteed. It is what the scheduler reserves when placing the pod, and what the node's capacity accounting counts. The kernel uses it as a relative weight when CPU is contended — a pod requesting 200m gets twice the CPU share of a pod requesting 100m under pressure.
 - A **limit** is the maximum the pod may consume. Exceeding a CPU limit results in **throttling** (the process is slowed, not killed). Exceeding a memory limit results in the container being **OOM-killed** (terminated by the kernel's out-of-memory killer) and restarted according to its restart policy. Memory is not compressible; CPU is. That asymmetry drives most resource-tuning decisions.
 
-Kubernetes assigns one of three classes:
+Kubernetes assigns one of three classes. The class is a useful label — it sets `oom_score_adj` — but **the kubelet does not consult QoS when choosing eviction victims.** Ranking is (1) usage above requests, (2) priority, (3) how far usage exceeds the request.
 
-| QoS class | Assignment rule | Kernel CPU treatment | Eviction under pressure |
+| QoS class | Assignment rule | Kernel CPU treatment | Typical eviction grouping |
 |---|---|---|---|
-| **Guaranteed** | Every container in the pod has requests equal to limits, for both CPU and memory | Weighted by its **request** — like every pod; not by class | **Last** |
-| **Burstable** | At least one container declares a **request or a limit**, and requests do not equal limits | Weighted by request | **Middle** — unless usage stays inside its request, in which case it groups with `Guaranteed` |
-| **BestEffort** | **No** container declares any request **or limit** | Minimum share; starved under contention, not throttled | **First** — but only because a zero request is exceeded by any usage at all |
-
-Read that last column as a *consequence*, not a rule. The reality, and the reason the conceptual section below exists: **the kubelet does not consult the QoS class when choosing eviction victims.** The class happens to correlate with the real ranking keys, and correlation is all it is.
+| **Guaranteed** | Every container in the pod has requests equal to limits, for both CPU and memory | Weighted by its **request** — like every pod; not by class | With other pods that stay inside their request |
+| **Burstable** | At least one container declares a **request or a limit**, and requests do not equal limits | Weighted by request | Over-request group if usage exceeds the request; otherwise with Guaranteed |
+| **BestEffort** | **No** container declares any request **or limit** | Minimum share; starved under contention, not throttled | Always in the over-request group, because a zero request is exceeded by any usage |
 
 ### How eviction actually chooses victims
 
@@ -507,7 +505,7 @@ Two further caveats. **Priority can override everything above** — a higher-pri
 
 The chain of reasoning is what matters, not the ordering table:
 
-- **Setting requests properly is not bookkeeping.** Requests determine where pods can be scheduled, how much CPU they get relative to neighbours under contention, and whether they are evicted first or last. A pod with no requests is `BestEffort`: it will be throttled first, evicted first, and it cannot participate meaningfully in autoscaling, because autoscaling targets are expressed as a percentage of requests ([Part 25.1](#251-hpa)).
+- **Setting requests properly is not bookkeeping.** Requests determine where pods can be scheduled, how much CPU they get relative to neighbours under contention, and whether they land in the over-request eviction group. A pod with no requests is `BestEffort`: it is starved under contention, evicted early (because any usage exceeds a zero request), and it cannot participate meaningfully in autoscaling, because autoscaling targets are expressed as a percentage of requests ([Part 25.1](#251-hpa)).
 - **Setting memory limits is mandatory; setting CPU limits is a judgement call.** Because memory is incompressible, a missing memory limit means a runaway pod can consume the node and trigger evictions of *other* pods. Because CPU is compressible, a CPU limit converts contention into throttling, which often causes latency problems worse than the contention itself — hence the common practice of setting CPU requests without CPU limits.
 - **`Guaranteed` is the right class for things you cannot afford to lose** — databases, gateways, and control-plane-adjacent workloads. Set requests equal to limits, for CPU and memory.
 - **`BestEffort` is almost always a mistake**, even for trivial workloads, because the failure mode (silent eviction under pressure, with the pod rescheduled or lost) is disproportionate to the small saving in configuration effort. If a workload is genuinely unimportant, say so with a low priority class rather than by omitting its requirements.
@@ -1080,7 +1078,7 @@ spec:
 
 What StatefulSet does **not** do: initialize a cluster, promote a replica, reconfigure membership, back up, or restore. That is operator territory (Part 17).
 
-Gotchas: **deleting a StatefulSet does not delete its PVCs** (deliberate — your data survives; but it also means orphaned volumes accumulate and cost money). Scaling down does not delete PVCs either.
+Gotchas: **deleting a StatefulSet does not delete its PVCs** (deliberate — your data survives; but it also means orphaned volumes accumulate and cost money). Scaling down does not delete PVCs either. (Unless `spec.persistentVolumeClaimRetentionPolicy` sets `whenDeleted`/`whenScaled` to `Delete` (Beta 1.27+): then the StatefulSet controller sets ownerRefs and garbage collection removes the PVCs. The default `Retain` matches the behaviour described here.)
 
 ## 6.4 DaemonSet
 
@@ -1092,8 +1090,8 @@ spec:
   updateStrategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 1 } }
   template:
     spec:
-      tolerations:                      # DaemonSets usually need to run everywhere
-        - { operator: Exists, effect: NoSchedule }
+      tolerations:                      # DaemonSets usually need to run everywhere (match ALL effects, incl. NoExecute on NotReady/Unreachable)
+        - { operator: Exists }
       containers: [...]
 ```
 
@@ -1147,17 +1145,17 @@ Guidance that holds in most cases:
 - **Set CPU limits deliberately, often by omitting them.** A CPU limit converts contention into throttling, and throttling frequently shows up as latency spikes that are hard to diagnose. Many production setups set CPU requests without CPU limits and rely on requests for fair sharing, while setting memory requests equal to memory limits for predictability.
 - **Size for the steady state, not the peak.** Requests based on peak usage waste capacity and can make pods unschedulable; requests based on nothing at all cause evictions. Use observed usage (see [Part 25.2](#252-vpa) on the Vertical Pod Autoscaler, which produces recommendations) rather than intuition.
 
-**QoS classes** — Kubernetes derives a pod's **QoS (Quality of Service) class** automatically from its requests and limits. It is not a setting to choose; it is a consequence of what is declared, and it determines eviction order when a node runs short of resources ([Part 2.10](#210-node-pressure-qos-and-eviction) explains the reasoning):
+**QoS classes** — Kubernetes derives a pod's **QoS (Quality of Service) class** automatically from its requests and limits. It is not a setting to choose; it is a consequence of what is declared. QoS is a useful label (it sets `oom_score_adj`), but **the kubelet does not rank node-pressure eviction by QoS class.** The documented order is (1) whether usage exceeds the request, (2) pod priority, (3) how far usage exceeds the request. [Part 2.10](#210-node-pressure-qos-and-eviction) covers the reasoning.
 
-| Class | Assigned when | CPU weight under contention | Eviction under node pressure |
+| Class | Assigned when | CPU weight under contention | What it actually predicts |
 |---|---|---|---|
-| `Guaranteed` | Every container sets requests **equal to** limits, for both CPU and memory | Proportional to its **request** — like every other pod | Evicted last |
-| `Burstable` | Any container declares a CPU or memory **request or limit**, and requests do not equal limits | Proportional to its **request** | Middle, *unless* its usage is within its request — then it groups with `Guaranteed` |
-| `BestEffort` | **No** container declares any CPU or memory request **or limit** | Minimum share — starved rather than throttled | Evicted first |
+| `Guaranteed` | Every container sets requests **equal to** limits, for both CPU and memory | Proportional to its **request** — like every other pod | Lower OOM score. If usage stays inside the request, grouped with other in-request pods |
+| `Burstable` | Any container declares a CPU or memory **request or limit**, and requests do not equal limits | Proportional to its **request** | If usage exceeds the request, grouped with BestEffort; if not, grouped with Guaranteed |
+| `BestEffort` | **No** container declares any CPU or memory request **or limit** | Minimum share — starved rather than throttled | Always over its (zero) request, so first in the over-request group |
 
-**Two corrections to how this is usually explained.** First, **the kernel's CPU weight comes from the container's CPU *request*, not from its QoS class.** A `Guaranteed` pod requesting 100m gets a *smaller* share than a `Burstable` pod requesting 500m. QoS class affects `oom_score_adj` (the OOM killer's preference), not CPU scheduling. Second, the common claim that Guaranteed pods are "least likely to be throttled" is backwards: because a Guaranteed pod has request *equal to* limit, it is throttled at that ceiling, while a Burstable pod with a CPU request and **no** CPU limit is never throttled at all. BestEffort pods are not "throttled first" either — with no requests they receive the minimum share and are simply starved when the node is busy.
+**Two things that are usually explained backwards.** First, **the kernel's CPU weight comes from the container's CPU *request*, not from its QoS class.** A `Guaranteed` pod requesting 100m gets a *smaller* share than a `Burstable` pod requesting 500m. QoS class affects `oom_score_adj` (the OOM killer's preference), not CPU scheduling. Second, the common claim that Guaranteed pods are "least likely to be throttled" is backwards: because a Guaranteed pod has request *equal to* limit, it is throttled at that ceiling, while a Burstable pod with a CPU request and **no** CPU limit is never throttled at all. BestEffort pods are not "throttled first" either — with no requests they receive the minimum share and are simply starved when the node is busy.
 
-**On eviction order, be careful:** the kubelet does **not** rank by QoS class. Its documented order is (1) whether the pod's usage exceeds its request, (2) pod priority, (3) how far usage exceeds the request. The practical consequence is the useful part: **a `Burstable` pod whose usage stays inside its request is evicted in the same group as a `Guaranteed` pod**, not "in the middle." QoS class is a rough predictor at best, and it does not apply at all to inode or PID starvation, or to `ephemeral-storage` requests.
+**On eviction order:** a `Burstable` pod whose usage stays inside its request is evicted in the same group as a `Guaranteed` pod, not "in the middle." QoS class is a rough predictor at best, and it does not apply at all to inode or PID starvation, or to `ephemeral-storage` requests.
 
 One practical note, which generalises beyond any single class: the kubelet prefers to evict pods whose *actual usage exceeds their request*, and **that rule is independent of QoS class** — it applies to every pod. So staying within your declared request is what protects you, not merely declaring one. And `priorityClassName` can override this ordering entirely (see below). The class is visible on any running pod:
 
@@ -1183,7 +1181,7 @@ kubectl get pod <pod> -o jsonpath='{.status.qosClass}'
     selector: { matchLabels: { app.kubernetes.io/name: api } }
   ```
   **A PDB can block node drains forever.** If `minAvailable` equals your replica count, `kubectl drain` hangs. This is intentional — it is telling you your workload can't tolerate any disruption.
-- **In-place pod resize** (Stable in 1.35) — change CPU/memory without a restart. Combined with VPA this finally makes right-sizing non-disruptive.
+- **In-place pod resize** (Stable in 1.35) — change CPU without a restart (default `resizePolicy: NotRequired` for CPU); memory resizes restart the container by default (`RestartContainer`), and CPU+memory together restart. Combined with VPA this finally makes right-sizing non-disruptive.
 - **Workload-aware scheduling** (introduced 1.35, advanced in 1.36/1.37) — Kubernetes is gaining the ability to schedule groups of related pods (gang scheduling) atomically, which matters enormously for distributed training and batch jobs where "all 8 workers or none" is the requirement.
 
 ---
@@ -1205,12 +1203,12 @@ You will not hand-write 40 near-identical Deployment manifests. You need a templ
 ## 7.2 Helm, concretely
 
 ```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo update
-helm search repo postgresql
-helm show values bitnami/postgresql > my-values.yaml     # ALWAYS read the values file
-helm template my-pg bitnami/postgresql -f my-values.yaml  # render locally, inspect
-helm upgrade --install my-pg bitnami/postgresql \
+# Example shape — pin a chart you actually trust. The public Bitnami catalog
+# (charts.bitnami.com / docker.io/bitnami) was restricted in 2025; many teams
+# now use OCI charts from the vendor, or a maintained fork. Always read values.
+helm show values oci://registry-1.docker.io/bitnamicharts/postgresql > my-values.yaml
+helm template my-pg oci://registry-1.docker.io/bitnamicharts/postgresql -f my-values.yaml
+helm upgrade --install my-pg oci://registry-1.docker.io/bitnamicharts/postgresql \
   -n data --create-namespace -f my-values.yaml --version 16.x.x --atomic --wait
 helm list -A
 helm history my-pg -n data
@@ -1219,7 +1217,7 @@ helm uninstall my-pg -n data
 ```
 
 **Helm practice that prevents pain:**
-- **Pin chart versions.** `--version` always. an unpinned `helm upgrade` after a `helm repo update` silently moving you from chart 1.2 to 2.0 is a classic incident.
+- **Pin chart versions.** `--version` always. An unpinned `helm upgrade` after a `helm repo update` silently moving you from chart 1.2 to 2.0 is a classic incident.
 - **`helm template` before applying.** Render and read the YAML. Never blindly `upgrade --install` something you haven't seen.
 - **`--atomic --wait`** so a failed upgrade rolls back instead of leaving you half-deployed.
 - **Don't `helm upgrade` third-party charts by hand in a GitOps world** — declare them as Argo CD `Application`s (Part 21) so git remains the source of truth.
@@ -1308,7 +1306,7 @@ data:
 ```
 
 - **As env vars** (`envFrom.configMapRef`) — simple, but **changes do not propagate to running pods.** You must restart the deployment. This trips people constantly.
-- **As a mounted volume** — the file in the container updates within ~60s (kubelet sync period) when the ConfigMap changes. This is the right choice for config files you want hot-reloadable, and it's why apps should watch their config file rather than reading it once at boot.
+- **As a mounted volume** — the file in the container updates within ~1–2 min (kubelet sync period ~1m plus apiserver watch/cache propagation; `subPath` mounts and env vars never update without a restart) when the ConfigMap changes. This is the right choice for config files you want hot-reloadable, and it's why apps should watch their config file rather than reading it once at boot.
 
 **Use `immutable: true`** for ConfigMaps/Secrets that shouldn't change — it prevents accidental modification and improves apiserver performance. Version your ConfigMaps by name (`api-config-v14`) and have the Deployment reference the version, so a config change is an explicit rolling update that GitOps can track (Part 21). This is far better than mutating a ConfigMap in place and hoping pods restart. (Kustomize's `configMapGenerator` hash suffix automates exactly this.)
 
@@ -1344,7 +1342,7 @@ resources:
 Storing secrets as encrypted blobs **in git** (Sealed Secrets, SOPS) was the previous generation and still works, but the modern pattern is: **the secret lives in a dedicated secret manager; Kubernetes syncs a reference to it.**
 
 - **External Secrets Operator (ESO)** — `SecretStore`/`ClusterSecretStore` + `ExternalSecret` CRDs pull from AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, HashiCorp Vault, 1Password, Doppler.
-- **Secrets Store CSI Driver** — mounts secrets as volumes from the same backends without creating a Secret object at all (better: nothing to read out of etcd).
+- **Secrets Store CSI Driver** — mounts secrets as volumes from the same backends without creating a Secret object at all (only when `syncSecret.enabled=false`; with secret-sync enabled a namespaced Secret IS created in etcd) (better: nothing to read out of etcd).
 - **Vault + injector / Vault Secrets Operator** — dynamic, short-lived database credentials. The strongest option, and the most operational work.
 
 ```yaml
@@ -1429,7 +1427,7 @@ kubectl exec -it nettest -- nslookup google.com     # egress + DNS test
 
 ## 9.3 DNS: CoreDNS
 
-CoreDNS is a Deployment in `kube-system` (usually 2 replicas) that serves cluster DNS. Every pod's `/etc/resolv.conf` points at the **kube-dns ClusterIP**.
+CoreDNS is a Deployment in `kube-system` (usually 2 replicas) that serves cluster DNS. Pods with `dnsPolicy: ClusterFirst` (the default for most workloads) have `/etc/resolv.conf` pointing at the **kube-dns ClusterIP**.
 
 Resolution patterns you must memorize, because half of all "why can't it connect" incidents are DNS:
 
@@ -1441,7 +1439,7 @@ Resolution patterns you must memorize, because half of all "why can't it connect
 <statefulset-pod>.<headless-svc>.<ns>.svc.cluster.local → stable pod identity
 ```
 
-**Search domains** are what make short names work — most resolv.conf has `search <ns>.svc.cluster.local svc.cluster.local cluster.local`. The classic trap: **`ndots:5`**. A name with fewer than 5 dots (e.g. `api.stripe.com` has 2) gets the search domains appended *first*, so it is tried as `api.stripe.com.prod.svc.cluster.local` and times out before the real lookup. This causes real latency and puzzling failures. Fixes: use fully qualified domain names (FQDNs) with a trailing dot (`api.stripe.com.`), or tune `dnsConfig` per pod:
+**Search domains** are what make short names work — most resolv.conf has `search <ns>.svc.cluster.local svc.cluster.local cluster.local`. The classic trap: **`ndots:5`**. A name with fewer than 5 dots (e.g. `api.stripe.com` has 2) gets the search domains appended *first*, so it is tried as `api.stripe.com.prod.svc.cluster.local` adding latency and extra queries before falling back to the original name (not a hard timeout; use a trailing dot / FQDN or tune `dnsConfig.ndots`). This causes real latency and puzzling failures. Fixes: use fully qualified domain names (FQDNs) with a trailing dot (`api.stripe.com.`), or tune `dnsConfig` per pod:
 
 ```yaml
 spec:
@@ -1479,7 +1477,7 @@ spec:
 **How it works** — and this differs enough between datapaths that one sentence cannot cover both:
 
 - **kube-proxy in iptables or IPVS mode** writes per-packet rules that **DNAT** the ClusterIP to a chosen pod IP, and records the translation in **conntrack**. That conntrack entry is what pins a whole connection to one backend, and it is also what determines source-IP behaviour and how `externalTrafficPolicy` works — so it is the thing to inspect when connections behave oddly.
-- **Cilium's eBPF datapath** instead resolves the Service at **socket level, at `connect()` time**. For in-cluster traffic the packet is sent straight to the chosen backend with no netfilter hop and no conntrack entry (and DSR mode avoids rewriting the return path entirely).
+- **Cilium's eBPF datapath** instead resolves the Service at **socket level, at `connect()` time**. For in-cluster traffic the packet is sent straight to the chosen backend with no netfilter hop and no *iptables* conntrack entry (Cilium still tracks state in its own BPF conntrack map) (and DSR mode avoids rewriting the return path entirely).
 
 Either way the observable contract is the same to a client: the ClusterIP and DNS name are stable, and the endpoints behind them are not. **Endpoints** / **EndpointSlices** are the actual list of (pod IP, port) that are *ready*. This is why the readiness probe is load-bearing for traffic:
 
@@ -1488,9 +1486,9 @@ kubectl get endpointslices -l kubernetes.io/service-name=api
 kubectl get endpoints api            # empty endpoints = selector mismatch or pods not Ready
 ```
 
-**Minimal-diff note:** a *named* `targetPort` (`targetPort: http`) resolves against a named `containerPort`, so it survives renumbering — but only if a `containerPort` with that name exists. A numeric `targetPort` needs no matching `containerPort` declaration at all (that field is informational); it must simply be a port the process actually listens on. Named ports are more maintainable.
+A *named* `targetPort` (`targetPort: http`) resolves against a named `containerPort`, so it survives renumbering — but only if a `containerPort` with that name exists. A numeric `targetPort` needs no matching `containerPort` declaration at all (that field is informational); it must simply be a port the process actually listens on. Named ports are more maintainable.
 
-**`externalIPs` is deprecated.** Kubernetes 1.36 deprecated `Service.spec.externalIPs`, and upstream's advice is that all users migrate away from it — toward an external load-balancer controller or a Gateway API implementation. It is *deprecated, not removed*, so manifests using it continue to work for now. Two reasons to migrate anyway: the field cannot support dual-stack, and address allocation was never managed by Kubernetes (the cluster administrator owns those IPs).
+**`externalIPs` is deprecated.** Kubernetes 1.36 deprecated `Service.spec.externalIPs` (KEP-5707). Upstream's advice is to migrate toward an external load-balancer controller or a Gateway API implementation. It is *deprecated, not removed*, so existing manifests still work. The reason is security — CVE-2020-8554 lets untrusted users claim arbitrary IPs for MITM — not dual-stack. The field is a string list and can hold v4 or v6 addresses; address allocation was never managed by Kubernetes (the cluster administrator owns those IPs).
 
 **Traffic distribution / topology:** by default, Service traffic can cross zones (costly and slower). `spec.trafficDistribution` lets you express a *preference* for topologically closer endpoints. The current values are **`PreferSameZone`** (prefer endpoints in the client's zone) and **`PreferSameNode`** (prefer endpoints on the client's node) — note that **`PreferClose` is now deprecated as an older, less precise alias for `PreferSameZone`**, so use the newer name in anything you write today. These are preferences, not guarantees: if no local endpoint is healthy, traffic crosses zones rather than failing. Use them on chatty internal services to cut cross-AZ latency and egress bills.
 
@@ -1538,7 +1536,7 @@ spec:
 
 **Realistic adoption path:** start with default-deny *ingress* per app namespace, then tighten egress — egress default-deny breaks things loudly and needs observability to do safely. Cilium can run in **policy audit mode** to log what *would* be blocked before you enforce, which is the correct way to roll this out. Cilium 1.19 added **NetworkPolicy enhancements** (richer selectors, better policy semantics) worth reading if you are on it.
 
-**Before you plan your address space:** pod and Service CIDR ranges cannot be changed later, and dual-stack adds a second family to plan. See [Part 42.1](#421-cidr-planning-the-decision-you-cannot-easily-reverse).
+**Before you plan your address space:** pod and Service CIDR ranges are painful to replace later (plan carefully); expansion is possible via secondary Service CIDRs / multiple ClusterCIDRs and dual-stack additions, but full replacement requires migration, and dual-stack adds a second family to plan. See [Part 42.1](#421-cidr-planning-the-decision-you-cannot-easily-reverse).
 
 **The egress gap:** NetworkPolicy controls L3/L4 by pod identity. It does not inspect HTTP, does not do FQDN allowlisting by default (Cilium's `toFQDNs` and Calico's DNS policy do), and it's enforced at the CNI, not at the app. For "this service may only call api.stripe.com over HTTPS," you want an **egress gateway / forward proxy** — the same reverse-proxy technology, pointed outbound. That's Part 11.9.
 
@@ -1592,7 +1590,7 @@ Two implementations:
 
 - **kube-proxy in iptables mode** (historic default): DNAT rules per Service/endpoint. O(n) rule churn as endpoints change; fine for small clusters, painful at thousands of Services. Uses **random** selection per connection.
 - **kube-proxy in IPVS mode**: hash-table based, better scaling, more algorithms available (rr, lc, sh, mh).
-- **eBPF (Cilium, kube-proxy replacement)**: service lookup in eBPF maps at the socket layer. Fastest, and it avoids the DNAT and conntrack overhead of the iptables path; also enables per-request visibility (Hubble) and socket-level load balancing. Be precise about what socket LB skips: it bypasses the **Service-VIP translation hop** by choosing the backend inside the socket at `connect()` time, so no iptables or conntrack entry is created — but the packets still traverse the network stack and the pod network to reach the chosen backend. It does not make pod-to-pod traffic bypass the stack, and plain pod-to-pod traffic that never targets a Service VIP is not involved at all.
+- **eBPF (Cilium, kube-proxy replacement)**: service lookup in eBPF maps at the socket layer. Fastest, and it avoids iptables DNAT and iptables-conntrack overhead (BPF conntrack still applies) of the iptables path; also enables per-request visibility (Hubble) and socket-level load balancing. Be precise about what socket LB skips: it bypasses the **Service-VIP translation hop** by choosing the backend inside the socket at `connect()` time, so no iptables or conntrack entry is created — but the packets still traverse the network stack and the pod network to reach the chosen backend. It does not make pod-to-pod traffic bypass the stack, and plain pod-to-pod traffic that never targets a Service VIP is not involved at all.
 
 **Algorithms available at L4 depend entirely on which datapath you are running**, and the differences are large enough to invalidate advice you may have read elsewhere:
 
@@ -1781,7 +1779,7 @@ Each of these is a real feature you configure, plus the failure mode if you get 
 3. **Connection timeout** — how long to wait for the TCP handshake with a backend.
 *Failure modes:* a request timeout shorter than your slowest legitimate request → random 504s on the 99th percentile. A timeout longer than your client's own timeout → your client gives up first and retries, doubling load. **Timeouts must increase as you move outward, never the reverse**: app < gateway < cloud LB < client. If an inner layer times out *after* an outer one, the outer layer returns an error for work the inner layer is still doing, and its retry multiplies the load.
 
-**Retries — and retry budgets.** Retry on 5xx/connect-failure/timeouts, N times, ideally only for idempotent methods, with exponential backoff and jitter. **A retry budget** (e.g. "retries may not exceed 20% of total requests") is the safety valve: without it, a broad outage causes every request to be retried 3×, tripling load on already-struggling backends and turning degradation into collapse. This is the classic **retry storm**, and Gateway API v1.3 added retry budgets to the spec specifically because of it. *Failure mode:* retries without jitter ⇒ synchronized retry waves.
+**Retries — and retry budgets.** Retry on 5xx/connect-failure/timeouts, N times, ideally only for idempotent methods, with exponential backoff and jitter. **A retry budget** (e.g. "retries may not exceed 20% of total requests") is the safety valve: without it, a broad outage causes every request to be retried 3×, tripling load on already-struggling backends and turning degradation into collapse. This is the classic **retry storm**. Envoy and Istio have first-class retry budgets; Gateway API v1.3 added an experimental Retry Budget GEP for the same reason. Per-rule `HTTPRouteRule.retry` (`attempts`, `codes`, `backoff`) is a separate Experimental field and is not a percentage budget. *Failure mode:* retries without jitter ⇒ synchronized retry waves.
 
 **Header manipulation.** Add, set, or remove request and response headers. Add `X-Request-Id` if absent, strip client-supplied `X-Forwarded-*` (spoofing risk), remove `Server`/`X-Powered-By` (information disclosure), add security headers (`Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options`). *Failure mode:* header name **casing** — HTTP/2 lowercases all header names, so an app doing exact-match on `X-My-Header` breaks when traffic moves to HTTP/2. This is a real and very confusing migration bug.
 
@@ -1991,10 +1989,10 @@ Why the separation matters concretely:
 | v1.0 | Oct 2023 | GA. GatewayClass/Gateway/HTTPRoute stable. |
 | v1.1 | 2024 | GRPCRoute stable, service mesh support. |
 | v1.2 | 2025 | Better listener/route semantics. |
-| **v1.3** | Jun 2025 | **Request mirroring, CORS, gateway merging, retry budgets** — retry budgets in particular are an operational safety feature (Part 11.4). |
+| **v1.3** | Jun 2025 | **Request mirroring, CORS, gateway merging, experimental retry budgets** (Part 11.4). |
 | **v1.4** | Nov 2025 | Continued stabilization, more fields to Standard. |
-| **v1.5** | Apr 2026 | Moving features to Stable. |
-| **v1.6** | Aug 2026 | **TCPRoute and UDPRoute graduate to Standard.** |
+| **v1.5** | Feb 2026 (blogged Apr 2026) | Moving features to Stable. |
+| **v1.6** | 30 Jun 2026 (blogged 3 Aug 2026) | **TCPRoute and UDPRoute graduate to Standard.** |
 | **Inference Extension** | 2025–2026 | LLM-specific routing (Part 30). |
 | **Ingress2Gateway 1.0** | Mar 2026 | Official Ingress→Gateway migration tooling. |
 
@@ -2002,9 +2000,9 @@ Why the separation matters concretely:
 
 - **Native traffic splitting** — `weight: 90/10` for canaries, first-class in the spec.
 - **Native header/query/method matching** — no annotations.
-- **Timeouts and retries (with budgets)** — in the object.
+- **Timeouts, per-rule retries, and experimental retry budgets** — in the object (retries and budgets need the Experimental channel).
 - **Cross-namespace routing with explicit grants** — safe delegation.
-- **Non-HTTP protocols** — TCP, UDP, TLS passthrough, gRPC as first-class (and now Standard, not experimental).
+- **Non-HTTP protocols** — gRPC Standard since v1.1; TCP and UDP Standard since v1.6; TLS passthrough (`TLSRoute`) still Experimental (`v1alpha2`).
 - **Multiple listeners on one gateway** — different hostnames, different TLS certs, different ports, one IP.
 - **Portability** — the same `HTTPRoute` works on Envoy Gateway, Cilium, Istio, Kong, Traefik, NGINX Gateway Fabric, HAProxy, and the cloud implementations, modulo implementation-specific policies.
 
@@ -2173,9 +2171,8 @@ spec:
         - { name: api, port: 80, weight: 90 }       # 90% to v1 Service
         - { name: api-v2, port: 80, weight: 10 }    # 10% canary
       timeouts: { request: 30s, backendRequest: 10s }
-      # NOTE: `retry` is a single object (not `retries`), and `backoff` is a
-      # Duration STRING, not a map. `retry` and `sessionPersistence` are
-      # Experimental — they need the Experimental CRD channel (see 12.1).
+      # retry is a single object (not retries); backoff is a duration string.
+      # retry and sessionPersistence are Experimental (see 12.1).
       retry:
         attempts: 3
         codes: [502, 503, 504]
@@ -2215,13 +2212,13 @@ Point `api.example.com` at the Gateway's address. Options, in increasing order o
 | Config beyond basic routing | ❌ annotations (non-portable) | ✅ typed fields + policy CRDs |
 | Traffic weighting | ❌ annotations | ✅ `weight` |
 | Header/query/method match | ❌ annotations | ✅ |
-| gRPC / TCP / UDP / TLS-passthrough | ❌ (TCP/UDP via annotation/ConfigMap) | ✅ first-class, **Standard as of v1.6** |
+| gRPC (Standard since v1.1) / TCP + UDP (Standard since v1.6) / TLS-passthrough (still Experimental, v1alpha2 in v1.6) | ❌ (TCP/UDP via annotation/ConfigMap) | ✅ graduated per-route — check channel per type |
 | Cross-namespace routing | ❌ unsafe or impossible | ✅ `ReferenceGrant` |
 | Role separation | ❌ one object | ✅ GatewayClass / Gateway / Route |
-| CORS | ❌ | ✅ **Standard as of v1.5** |
-| Retry budgets, request mirroring | ❌ | ✅ mirroring Standard; `retry` is Experimental |
+| CORS | ❌ | ✅ Standard Channel since v1.5, Extended support (not portable Core — check implementation) |
+| Per-rule retry + request mirroring | ❌ | ✅ mirroring (RequestMirror) is Core; retry (`HTTPRouteRule.retry`) is Experimental. Retry *budgets* (percentage cap) are a separate Experimental GEP from v1.3 — check your implementation |
 | Portability across vendors | ❌ effectively none | ✅ core spec is portable |
-| Ecosystem direction | ❄️ frozen, reference impl retired 2026 | ✅ active |
+| Ecosystem direction | Ingress API frozen but still supported/GA; the community `ingress-nginx` controller (not the API) retired Mar 2026 | ✅ active |
 
 **Verdict for a new, empty cluster in 2026: use Gateway API. Do not build a new Ingress-based setup.** If you inherit Ingress objects, use **Ingress2Gateway** (1.0, Mar 2026) to migrate, and read the "Five Surprising Ingress-NGINX Behaviors" guidance first — the migration is not purely mechanical.
 
@@ -2244,7 +2241,7 @@ A service mesh is **a distributed reverse proxy with a control plane** — the s
 
 ## 13.1 What a mesh actually provides
 
-1. **mTLS everywhere, automatically** — every pod-to-pod connection encrypted and mutually authenticated, with certificates issued and rotated by the control plane. This is the #1 reason companies adopt a mesh (compliance, zero-trust).
+1. **mTLS between enrolled workloads** — every enrolled pod-to-pod connection encrypted and mutually authenticated, with certificates issued and rotated by the control plane. Enrollment is not automatic on install: you inject a sidecar or label the namespace, then set `PeerAuthentication` to `STRICT` (the default is `PERMISSIVE`, which still accepts plaintext). This is the #1 reason companies adopt a mesh (compliance, zero-trust).
 2. **Workload identity** — each workload gets a cryptographic identity (SPIFFE ID like `spiffe://cluster.local/ns/prod/sa/api`), and policy is written against identity, not IP.
 3. **L7 authorization** — "service A may only `POST /orders` on service B," enforced cryptographically, not by network location.
 4. **Traffic management** — per-route retries, timeouts, circuit breaking, weighted traffic shifting, fault injection, mirroring, locality-aware routing.
@@ -2286,19 +2283,20 @@ In Istio, the mesh *is* a Gateway API implementation: `Gateway` resources with `
 
 # Part 14 — TLS and Certificates
 
-**cert-manager** is effectively mandatory. It watches `Certificate` objects and Ingress/Gateway annotations, obtains certs from ACME (Let's Encrypt), a private CA, Vault, or a cloud ACM, and writes them into `Secret`s that the Gateway consumes. It also handles renewal — which is the real reason you use it, because hand-renewed certificates is exactly the toil that causes outages.
+**cert-manager** is effectively mandatory. It watches `Certificate` objects and Ingress/Gateway annotations, obtains certs from ACME (Let's Encrypt), a private CA, Vault, or a cloud ACM, and writes them into `Secret`s that the Gateway consumes. It also handles renewal — which is the real reason you use it, because hand-renewed certificates are exactly the toil that causes outages.
 
 ```bash
-helm repo add jetstack https://charts.jetstack.io
-helm install cert-manager jetstack/cert-manager \
+# Official chart is OCI (the classic charts.jetstack.io Helm repo is deprecated).
+# Pin the version; check cert-manager.io/docs/releases before choosing one.
+helm install cert-manager oci://quay.io/jetstack/charts/cert-manager \
   --namespace cert-manager --create-namespace \
   --set crds.enabled=true \
   --set config.gatewayAPI.enabled=true \
-  --version v1.21.0        # check cert-manager.io/docs/releases before pinning
+  --version v1.21.0
 
-# NOTE: Gateway API support is NOT enabled by default. Without
+# Gateway API support is not enabled by default. Without
 # config.gatewayAPI.enabled=true, cert-manager ignores Gateway/HTTPRoute
-# resources entirely, and an `http01.gatewayHTTPRoute` solver never runs —
+# resources, and an http01.gatewayHTTPRoute solver never runs —
 # the Certificate just sits there without being issued.
 ```
 
@@ -2350,7 +2348,7 @@ spec:
 **TLS in the proxy chain:** decide explicitly where TLS terminates and whether you re-encrypt. Common patterns:
 - Terminate at cloud LB, plaintext to the cluster — fast, simple, weaker.
 - Terminate at cloud LB, re-encrypt to the Gateway — better.
-- **Terminate at cloud LB → re-encrypt to Gateway → re-encrypt to backend (`BackendTLSPolicy`)** — strongest, most certificates to manage, most places for a cert to expire.
+- **Terminate at cloud LB → re-encrypt to Gateway → re-encrypt to backend (`BackendTLSPolicy`, Experimental channel `gateway.networking.k8s.io/v1alpha3` — Gateway→backend hop only, not LB→Gateway)** — strongest, most certificates to manage, most places for a cert to expire.
 - **Passthrough to the backend** — the Gateway can't route on L7, so this only works for single-backend listeners (or SNI routing).
 
 Pick deliberately; the "everything encrypted everywhere" option is genuinely more operational work, and you should know you're signing up for it.
@@ -2516,11 +2514,11 @@ spec:
 
 1. **Anti-affinity across zones.** Three replicas in one zone is not HA; it's three failures with one cause.
 2. **Storage that survives pod rescheduling**, with `WaitForFirstConsumer` binding and enough IOPS. Database performance is 90% storage.
-3. **Backups to object storage, off-cluster.** A backup in the same cluster (or same cloud account) is not a backup — a cluster deletion or account compromise takes both. **Test restores on a schedule.** An untested backup is a hope.
+3. **Backups to object storage, off-cluster.** A backup in the same cluster is not a backup; prefer a separate account/region, though a same-account bucket with versioning + Object Lock still counts as a backup for operator error (not for account compromise) — a cluster deletion or account compromise takes both. **Test restores on a schedule.** An untested backup is a hope.
 4. **PITR, not just nightly dumps.** A nightly dump loses up to 24h of data. WAL archiving gives you point-in-time recovery.
-5. **Resource limits set high enough not to OOM, and requests == limits** (`Guaranteed` QoS) so the DB is last to be evicted.
+5. **Resource limits set high enough not to OOM, and requests == limits** (`Guaranteed` QoS) to lower OOM score (eviction also weighs PriorityClass and usage-vs-requests, so not a guarantee; avoid CPU limits that throttle DBs).
 6. **PodDisruptionBudget** that doesn't block failover, and a **maintenance window** strategy for node upgrades.
-7. **Connection pooling.** Postgres forks a process per connection; 500 app pods × 10 connections = dead database. Use **PgBouncer** (transaction mode) as a sidecar or a Deployment, or a pooler built into your operator. This is *the* most common self-hosted-DB outage.
+7. **Connection pooling.** Postgres forks a process per connection; 500 app pods × 10 connections = dead database. Use **PgBouncer** as a centralized pooler Deployment (e.g. CNPG Pooler), not a per-pod sidecar; transaction mode breaks prepared statements/advisory locks — test compatibility, or a pooler built into your operator. This is *the* most common self-hosted-DB outage.
 8. **Migrations as explicit, versioned steps**, run via Jobs/Argo hooks — never as an implicit side effect of app startup in a multi-replica Deployment (N replicas racing to migrate = corruption).
 9. **Secrets in an external store** (Part 8), not committed to git.
 10. **Know your failover time.** Measure it. "It should fail over" and "it fails over in 40 seconds, and our clients time out at 30" are different facts.
@@ -3297,7 +3295,7 @@ There are **four independent autoscalers** in a modern cluster. Confusing them c
 | **Cluster Autoscaler / Karpenter** | Node count | Scales **up** on pods that failed to schedule and would fit on a new node; scales **down** on nodes whose pod *requests* are well below allocatable. It is not a CPU-usage autoscaler. | Cloud provider integration |
 | **KEDA** | Pod count, incl. scale-to-zero | Event sources (Kafka lag, queue depth, cron, Prometheus) | KEDA + ScaledObject |
 
-**New in 1.37: HPA scale-to-zero went Beta.** HPA can now scale a workload to zero replicas (previously KEDA-only territory), which is a significant change for cost optimization of idle services — and a change you must design for, because a workload at zero needs a real cold-start path.
+**New in 1.37: HPA scale-to-zero went Beta.** HPA can now set `minReplicas: 0`, but **only with object or external metrics**. An HPA that scales only on CPU or memory is rejected — zero pods produce no resource signal. Previously this was KEDA-only territory. A workload at zero also needs a real wake path (a metric that still exists when no pods are running, or KEDA), or the first request after idle fails.
 
 ## 25.1 HPA
 
@@ -3327,7 +3325,7 @@ spec:
 - **HPA fights GitOps** if `replicas` in git and HPA both manage the same field. Fix: **do not set `replicas` in the GitOps manifest** (or configure Argo CD `ignoreDifferences` for `/spec/replicas`). Otherwise Argo CD will reset the replica count to the git value every sync. This bites everyone once.
 - **Scale-up can't outrun a slow-starting app.** If a pod takes 3 minutes to be ready, HPA reacting to CPU/user load is *too late*. You need headroom (raise `minReplicas`) or scale on a leading indicator (queue depth via KEDA, RPS via a custom metric) rather than a lagging one. **Proxy request rate per pod is a great leading indicator** and is often available from your gateway's metrics.
 - **Cluster capacity limits HPA.** If the cluster has no room for new nodes, HPA raises `replicas` and pods sit `Pending`. HPA and cluster autoscaler must be paired.
-- **Scale-to-zero (beta in 1.37) needs a wake path.** Requests must be able to trigger scale-up; otherwise the first request after idle fails.
+- **Scale-to-zero (beta in 1.37) is not for CPU/memory HPAs.** `minReplicas: 0` is allowed only with object or external metrics. Pair it with a metric that still exists at zero replicas, and a wake path; otherwise the first request after idle fails.
 
 ## 25.2 VPA
 
@@ -3345,7 +3343,7 @@ Batch and event-driven workloads scale on different signals entirely (queue dept
 ## 25.4 Real capacity planning
 
 - **Requests are your capacity budget.** Cluster usable capacity = sum of allocatable resources minus system reservations. Keep total requests at 60–70% of allocatable; above that, scheduling failures and eviction storms start.
-- **Right-size continuously.** Under-requested pods cause OOMKills and evictions; over-requested pods waste money and block scheduling. VPA recommendations + `kubectl top` + a periodic review is how you keep this honest.
+- **Right-size continuously.** Under-*requesting* causes overcommit, CPU throttling, noisy neighbours, and later evictions. OOMKill is *usage vs limits* (or node memory pressure). Over-requesting wastes money and blocks scheduling. Size requests for scheduling, limits for survival. VPA recommendations + `kubectl top` + a periodic review is how you keep this honest.
 - **Know your ceilings**: max pods per node (110 default, ENI-limited on AWS), max nodes per cluster, IP space (a /16 pod CIDR is a real constraint at scale), and API server QPS limits.
 - **Load test before launch**, and test *failure*: kill a node, kill a zone, kill the database, kill the gateway. Chaos engineering (Litmus, Chaos Mesh, AWS FIS — Fault Injection Simulator) turns "we think it fails over" into evidence. **Kill a gateway replica** specifically — proxy-layer failover is the least-tested and most-impactful path.
 
@@ -3380,7 +3378,7 @@ Things that need to happen on a schedule, not "when we remember":
 6. **Repeat minor by minor**, dev → staging → prod, with a bake period.
 
 **Specific recent breakages to watch for** if you're crossing these versions:
-- **`Service.spec.externalIPs` deprecated in 1.36** — not removed, but upstream advises migrating off it; it is incompatible with dual-stack.
+- **`Service.spec.externalIPs` deprecated in 1.36** — not removed, but upstream advises migrating off it (security: CVE-2020-8554 / KEP-5707, not dual-stack).
 - **SELinux volume label changes** (GA in 1.36, with implications in 1.37) — can change how volumes are labeled on SELinux-enforcing hosts.
 - **etcd 3.6/3.7 upgrades** — there's a documented "zombie cluster member" footgun when upgrading to etcd 3.6. Read before you upgrade etcd.
 - **Declarative validation GA (1.36)** and **storage version migration enabled by default (1.37)** change some upgrade behaviors.
@@ -3408,7 +3406,7 @@ This is the short version; the full anatomy of a safe drain, why drains hang, an
 
 Common blockers: **a PDB preventing eviction** (check whether it's `minAvailable == replicas`), **emptyDir data loss** warnings, **`local-path` volumes / hostPath** pinning pods, and **StatefulSet pods**, where what actually blocks or breaks is either a PDB preventing eviction, or the application being unable to re-form quorum after a member moves.
 
-**Spot instance interruptions** deserve their own handling: a 2-minute termination notice arrives on the instance metadata service. The **AWS Node Termination Handler** (or Karpenter's native handling) cordons and drains gracefully. Without it, spot reclaims look like random pod restarts.
+**Spot instance interruptions** deserve their own handling. Notice windows differ by provider: roughly two minutes on AWS, about 30 seconds on GCP preemptible/spot and Azure Spot (plus Scheduled Events). The **AWS Node Termination Handler**, Karpenter's native handling, or the equivalent on GCP/Azure, cordons and drains before the machine disappears. Without it, spot reclaims look like random pod restarts. PDBs do not apply — reclaim is involuntary.
 
 ## 26.5 Platform add-on inventory
 
@@ -3554,10 +3552,10 @@ Multi-cluster compute is comparatively easy. **Multi-cluster data is where multi
 
 Kubernetes makes it easy to spend money invisibly. Where it goes, and what to do:
 
-- **Node overhead (often 30–60% of the bill).** Fix with Karpenter/Cluster Autoscaler consolidation, **spot/reserved instances** for stateless workloads (with `topologySpreadConstraints` and PDBs so spot interruptions don't hurt), and right-sizing requests. Track **requested vs used** — most clusters run at 15–30% actual utilization against requests.
+- **Node overhead (often 30–60% of the bill).** Fix with Karpenter/Cluster Autoscaler consolidation, **spot/reserved instances** for stateless workloads (with `topologySpreadConstraints`, headroom and the cluster's interruption handler (e.g. AWS Node Termination Handler / Karpenter drift) so spot interruptions don't hurt (PDBs only cover voluntary evictions, not spot reclaim)), and right-sizing requests. Track **requested vs used** — most clusters run at 15–30% actual utilization against requests.
 - **Orphaned resources.** Released PVs, unattached cloud disks, unused LoadBalancers (**each is a monthly charge**), old snapshots, abandoned dev namespaces. Automate detection; this is free money. Remember that deleting a StatefulSet leaves PVCs behind by design.
 - **NAT gateway data processing.** A quiet, large line item. Route cloud-service traffic through VPC endpoints (Part 15.2), not the NAT gateway.
-- **Cross-AZ and cross-region traffic.** Chatty services paying egress. Use `trafficDistribution: PreferSameZone` (or `PreferSameNode` where appropriate) and zone-aware placement.
+- **Cross-AZ and cross-region traffic.** Chatty services paying egress. Use `trafficDistribution: PreferSameZone` (needs >=1.33 with the `PreferSameTrafficDistribution` gate, Beta 1.34, Stable 1.35; `PreferClose` is its deprecated alias) and zone-aware placement.
 - **Log and metric volume.** Logs are the sneaky one — verbose debug logging in prod can cost more than the compute. **Proxy access logs are a major contributor at high request rates**; sample or trim fields if the bill is large. Sample traces, filter logs, set retention.
 - **Overprovisioning for HA.** 3 replicas of everything, Multi-AZ, PDBs, and now multiple gateway/proxy replicas and possibly a mesh — necessary, but budget it. Autoscale down at night for non-prod (KEDA cron scaling, or scaled-to-zero dev environments — and note HPA can now scale to zero in 1.37).
 - **Cost allocation.** You cannot optimize without showing teams their spend. Label namespaces with `team`/`cost-center`, run **OpenCost** or the cloud's own cost allocation, and review monthly. This single practice usually finds 20–40% savings.
@@ -3603,7 +3601,7 @@ The old way: `resources.limits: { nvidia.com/gpu: 1 }` — a bare integer count.
 
 **One correction to a widespread misconception:** MIG partitioning and GPU time-slicing/MPS are **not** DRA features. They are NVIDIA device-plugin and GPU Operator capabilities that predate DRA — MIG instances are advertised as ordinary extended resources (e.g. `nvidia.com/mig-1g.5gb`) and time-slicing is enabled in the device plugin's configuration. Both are *also* available through DRA, whose driver can allocate MIG devices. The accurate framing is that MIG and time-slicing work on **either** path, and DRA's distinctive contribution is **attribute- and topology-aware selection** among devices — pinning a specific GPU model, or requiring a GPU and an RDMA NIC on the same NUMA node — which a bare integer count genuinely cannot express.
 
-**If you're building GPU infrastructure now, learn DRA, not the extended-resource syntax.** The **device plugin** — the kubelet-side agent that advertises GPUs to the scheduler — is the older mechanism that DRA is progressively replacing for *selection*, though the plugin remains the mechanism for sharing and partitioning.
+**If you're building GPU infrastructure now, learn DRA *in addition to* extended-resource syntax (`nvidia.com/gpu: 1` device-plugin path still dominates; DRA drivers/topology such as NUMA/RDMA co-location are not yet universal).** The **device plugin** — the kubelet-side agent that advertises GPUs to the scheduler — is the older mechanism that DRA is progressively replacing for *selection*, though the plugin remains the mechanism for sharing and partitioning.
 
 ## 30.4 Practical GPU cluster concerns
 
@@ -3705,7 +3703,7 @@ For an empty cluster, this is a sane order. Each step assumes the previous one w
 8. **cert-manager** + a staging ClusterIssuer.
 9. **LoadBalancer path** (MetalLB on bare metal, or the cloud controller) — verify a Service gets an external IP.
 10. **Gateway API + a reverse proxy** (Envoy Gateway / Cilium / cloud), plus a controller designed for a shared Gateway. Get one public hostname serving TLS to a test pod — end to end, DNS included. **Understand which proxy is in the path and how to inspect its config** (Part 11.8).
-11. **External Secrets Operator** wired to your secret manager; enable **encryption at rest** for Secrets.
+11. **External Secrets Operator** wired to your secret manager; sync secrets (encryption at rest is separate: `kube-apiserver --encryption-provider-config` / KMS or the managed toggle).
 12. **Namespaces** with labels, ResourceQuotas, LimitRanges, and **PSA `enforce: baseline`**.
 
 **Phase 2 — Delivery (week 1–2)**
@@ -3767,7 +3765,7 @@ kubectl explain deployment.spec.strategy
 kubectl get pods -A -o wide
 kubectl get all -n prod
 kubectl get pods -n prod --sort-by=.status.startTime
-kubectl get pods -A --field-selector=status.phase!=Running
+kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded   # exclude healthy Succeeded Jobs
 kubectl get events -A --field-selector type=Warning --sort-by=.lastTimestamp | tail -30
 kubectl describe pod <pod> -n prod
 kubectl get deploy api -o yaml
@@ -3834,8 +3832,8 @@ kubectl rollout status deploy/api
 kubectl rollout history deploy/api
 kubectl rollout undo deploy/api --to-revision=2   # then re-sync from git (Part 21)
 kubectl rollout restart deploy/api
-kubectl rollout pause deploy/api && kubectl rollout resume deploy/api
-kubectl create job --from=cronjob/nightly-report manual-run
+kubectl rollout pause deploy/api && kubectl rollout resume deploy/api   # Deployments only (not StatefulSet/DaemonSet)
+kubectl create job manual-run --from=cronjob/nightly-report
 ```
 
 **Nodes**
@@ -3873,7 +3871,7 @@ argocd app get api-prod
 argocd app diff api-prod
 argocd app sync api-prod
 argocd app history api-prod
-argocd app rollback api-prod <id>
+argocd app sync api-prod   # prefer `git revert` + sync over `app rollback` (rollback uses live history and diverges from git)
 kubectl -n argocd get applications -o wide
 kubectl -n argocd get app <name> -o jsonpath='{.status.sync.status}{"\n"}{.status.health.status}'
 ```
@@ -3902,6 +3900,7 @@ kubectl get pod <pod> -o jsonpath='{.status.conditions}' | jq
 kubectl get pod <pod> -o jsonpath='{range .status.containerStatuses[*]}{.name}{"\t"}{.restartCount}{"\t"}{.lastState.terminated.reason}{"\n"}{end}'
 
 # Pods with no CPU/memory requests (Burstable, or BestEffort if they also set no limits)
+# Also inspect initContainers / ephemeralContainers and per-container limits for true QoS
 kubectl get pods -A -o json | jq -r '.items[] | select([.spec.containers[].resources.requests] | all(. == null)) | "\(.metadata.namespace)/\(.metadata.name)"' | sort -u
 
 # Node capacity vs allocated
@@ -3914,7 +3913,8 @@ kubectl get certificate -A -o json | jq -r '.items[] | select(.status.notAfter !
 kubectl get pv | awk '$5=="Released"'
 
 # Services with no endpoints (broken selectors)
-kubectl get endpoints -A | awk '$3=="<none>"'   # column 3: NAMESPACE is column 1 with -A
+# EndpointSlice is the default backend since 1.21; legacy Endpoints may be empty even when slices are not
+kubectl get endpointslices -A -o json | jq -r '.items[] | select((.endpoints // []) | length==0) | .metadata.namespace + "/" + .metadata.name'
 ```
 
 ---
@@ -4311,7 +4311,7 @@ Part 6.6 introduced priority classes. Their operational use deserves more detail
 
 That second effect is powerful and dangerous. A misconfigured priority can cause a batch job to evict production. Guidance:
 
-- **Define a small number of tiers and apply them consistently.** For example: `platform-critical` (1000000) for cluster infrastructure, `platform` (100000) for shared services, `app` (10000) for production applications, `batch` (1000) for jobs, and the default (0) for everything else. Two constraints on the numbers: user-defined priorities may not exceed **1000000000**, and the highest built-in values are reserved (`system-cluster-critical` = 2000000000, `system-node-critical` = 2000001000). Also note the naming rule — **a PriorityClass name may not begin with `system-`**, which is why the example above is `platform-critical` rather than `system-critical`; the API rejects the latter.
+- **Define a small number of tiers and apply them consistently.** For example: `platform-critical` (1000000) for cluster infrastructure, `platform` (100000) for shared services, `app` (10000) for production applications, `batch` (1000) for jobs, and the default (0) for everything else. Two constraints on the numbers: user-defined priorities may not exceed **1000000000**, and the highest built-in values are reserved (`system-cluster-critical` = 2000000000, `system-node-critical` = 2000001000). Do not name your own classes with a `system-` prefix — that prefix is reserved for Kubernetes itself. Use `platform-critical`, not `system-critical`.
 - **Never leave everything at the default priority.** If all pods are equal, preemption cannot help anything, and under pressure the cluster behaves arbitrarily.
 - **Preemption should be rare.** If it happens routinely, the cluster is chronically overcommitted, and the correct fix is capacity — not a priority arms race where every team raises its own numbers.
 - **Mark non-preempting critical pods with `preemptionPolicy: Never`** when a pod must have high scheduling priority but must never be the cause of evicting someone else.
@@ -4537,7 +4537,7 @@ Three mitigations, and production setups usually need all three:
 Node autoscalers (cluster autoscaler, Karpenter) both add and **remove** nodes. Removal is where maintenance concerns appear:
 
 - **Consolidation** — Karpenter and the cluster autoscaler actively move workloads off underutilized nodes to remove them. This is a continuous, automated drain. It respects PDBs, which means a workload with a restrictive PDB will keep an otherwise-empty node alive indefinitely (and cost money). If nodes are not being consolidated as expected, check PDBs first.
-- **Spot interruption** — spot capacity is reclaimed with roughly a two-minute notice. Handling it requires the notice to be acted on: the **AWS Node Termination Handler**, or Karpenter's built-in handling, cordons and drains the node before it disappears. Without it, spot reclaims appear as pods vanishing, and anything without a controller is lost.
+- **Spot interruption** — spot capacity is reclaimed with roughly a two-minute notice on AWS, ~30s on GCP preemptible/spot and Azure Spot (plus Scheduled Events) — qualify per provider and run the interruption handler. Handling it requires the notice to be acted on: the **AWS Node Termination Handler**, or Karpenter's built-in handling, cordons and drains the node before it disappears. Without it, spot reclaims appear as pods vanishing, and anything without a controller is lost.
 - **Scale-to-zero risks** — a scale-down that removes the last node of a given type can strand pods that require that type (`nodeSelector` for a GPU, say). Autoscalers handle this, but a pod with a hard node affinity and no matching node pool will sit `Pending` while the autoscaler cannot help it. The event message says so explicitly.
 
 **Check the autoscaler's own logs when capacity behaves strangely.** "I scaled up but no nodes appeared" is answered there, not in the application: common reasons are an instance type unavailable in that zone, an account quota exhausted, or a pod whose resource requests no instance type can satisfy (a classic: a pod requesting 200 GB of memory in a cluster whose largest instance has 128 GB — it will never schedule, and no amount of autoscaling will fix it).
@@ -4590,11 +4590,13 @@ Every other control-plane component is stateless and replaceable. etcd is a dist
 **Defragmentation.** etcd never returns freed space to the filesystem on its own. Deleting objects frees logical space inside the database file, but the file stays the same size. Over months, an etcd database can grow to several times its logical content. **Defragmentation reclaims that space** and is a required periodic task:
 
 ```bash
-# On each etcd member, one at a time — defrag blocks the member briefly
+# On each etcd member, one at a time — defrag blocks the member briefly.
+# Use healthcheck-client (or apiserver-etcd-client), not server.crt:
+# server.crt is server-auth and often lacks clientAuth, so the handshake fails.
 ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 \
   --cacert=/etc/kubernetes/pki/etcd/ca.crt \
-  --cert=/etc/kubernetes/pki/etcd/server.crt \
-  --key=/etc/kubernetes/pki/etcd/server.key \
+  --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+  --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
   defrag
 
 # Check size and health afterwards
@@ -4621,7 +4623,7 @@ Two failure modes that look like "the cluster is broken" and are actually contro
 
 **The API server is being hammered.** Symptoms: `kubectl` commands time out, controllers fall behind, and everything feels slow. Causes: a controller with a list-watch bug, a client with no rate limiting, a CronJob that lists every pod in the cluster every minute, or a genuinely huge number of objects. Diagnosis starts with the API server's own metrics — request rate, latency, and the count of in-flight requests by verb and resource — which identify the caller. **Part 41 covers API Priority and Fairness**, the mechanism that prevents one client from starving everyone else.
 
-**The cluster is too large for its control plane.** Very large clusters (thousands of nodes, hundreds of thousands of pods) hit real limits in etcd, the API server's watch caches, and the scheduler. Managed providers publish scaling targets and will throttle you beyond them. Self-managed clusters need deliberate tuning: **sharded list-and-watch** (server-side sharding, available in recent versions) and careful controller cache design are what make large clusters viable, and both are active areas of Kubernetes development.
+**The cluster is too large for its control plane.** Very large clusters (thousands of nodes, hundreds of thousands of pods) hit real limits in etcd, the API server's watch caches, and the scheduler. Managed providers publish scaling targets and will throttle you beyond them. Self-managed clusters need deliberate tuning: **WatchList / streaming lists** (KEP-3157 / KEP-2340) to keep informers off expensive full lists, and — still alpha as of 1.36 — **server-side sharded list-and-watch** (KEP-5866, `ShardedListAndWatch` feature gate) so each controller replica receives only its slice. Careful controller cache design is the rest of the work.
 
 **Practical monitoring for a self-managed control plane** — these are the signals that predict trouble:
 
@@ -4692,7 +4694,7 @@ For most clusters, the defaults are correct and the useful actions are *diagnost
 
 ```
 apiserver_flowcontrol_rejected_requests_total     # requests rejected with 429
-apiserver_flowcontrol_current_inqueue_requests    # queue depth per priority level
+apiserver_flowcontrol_current_in_queue_requests    # queue depth per priority level
 apiserver_flowcontrol_dispatched_requests_total
 apiserver_flowcontrol_nominal_limit_seats         # the lane's capacity
 ```
@@ -4786,7 +4788,7 @@ There are three distinct address spaces:
 
 ## 42.2 IPv6 and dual-stack
 
-Kubernetes has supported dual-stack (IPv4 and IPv6 simultaneously) as a stable feature for several major versions, and dual-stack has been enabled by default since 1.21. IPv6-only clusters are supported by the major Linux CNIs and cloud providers, but the claim is not universal: **Windows nodes do not support single-stack IPv6-only networking**, and some CNIs (Flannel, for example) are IPv4 fabrics. Verify support for your specific CNI and node OS before planning an IPv6-only cluster. The practical considerations:
+Kubernetes has supported dual-stack (IPv4 and IPv6 simultaneously) as a stable feature for several major versions, and dual-stack has been enabled by default since 1.21. IPv6-only clusters are supported by the major Linux CNIs and cloud providers, but the claim is not universal: **Windows nodes do not support single-stack IPv6-only networking**, and some older CNI versions default to IPv4 (check per-version docs — Flannel has had IPv6/dual-stack support since ~v0.18+). Verify support for your specific CNI and node OS before planning an IPv6-only cluster. The practical considerations:
 
 **Why dual-stack rather than IPv6-only:** during a long migration you need both; some dependencies and clients remain IPv4-only for years.
 
@@ -4818,7 +4820,7 @@ Session affinity (`spec.sessionAffinity: ClientIP`) makes a Service send request
 2. **Terminate the session at the reverse proxy** using a cookie rather than an IP, which survives NAT and IP changes. Every L7 proxy supports cookie-based affinity, and Gateway API intends to express it.
 3. **Use consistent hashing at L7** if the goal is cache locality rather than "sessions" — routing a key to a stable backend deliberately.
 
-`sessionAffinityConfig.clientIP.timeoutSeconds` controls how long the affinity lasts. Note that a long timeout combined with rolling updates produces a specific failure: clients stay pinned to a pod that is terminating, and the pod's removal from endpoints makes those clients fail until the timeout expires.
+`sessionAffinityConfig.clientIP.timeoutSeconds` controls how long the affinity lasts. Note that a long timeout combined with rolling updates produces a specific failure: clients stay pinned to a pod that is terminating, and the pod's removal from endpoints makes those clients fail briefly — Terminating pods are removed from Endpoints/EndpointSlices so kube-proxy/IPVS/eBPF re-select; affinity to a non-ready endpoint is not honoured (use preStop sleep for drain).
 
 ## 42.4 MTU: the cause of the strangest symptom in container networking
 
@@ -5031,7 +5033,7 @@ A workable default layout:
 
 | Pool | Instance profile | Taint | Purpose |
 |---|---|---|---|
-| **system** | Small, stable, on-demand | `CriticalAddonsOnly` or none | CNI, CSI, DNS, monitoring agents, the CNI's DaemonSets |
+| **system** | Small, stable, on-demand | `dedicated=system:NoSchedule` (with matching toleration; note `CriticalAddonsOnly` is a built-in *toleration*, not a taint key) | CNI, CSI, DNS, monitoring agents, the CNI's DaemonSets |
 | **general** | Balanced, mixed on-demand/spot | none | Ordinary stateless services |
 | **memory** | High memory-per-CPU | `workload=memory:NoSchedule` | Caches, in-memory databases, JVMs |
 | **compute** | High CPU | `workload=compute:NoSchedule` | Batch, encoding, compilation |
@@ -5042,7 +5044,7 @@ A workable default layout:
 
 **Give system DaemonSets their own space.** Running the CNI on the same nodes as memory-hungry workloads means an eviction storm can take out networking for every pod on the node — including the ones that would have restarted the CNI. A small, dedicated, on-demand system pool is cheap insurance.
 
-**Spot capacity belongs in its own pool** (or in a Karpenter-provisioned node that declares it), with tolerations on the workloads that can tolerate interruption and PDBs that make the drain orderly. Mixing spot and on-demand in one pool means you cannot predict which workloads will be interrupted.
+**Spot capacity belongs in its own pool** (or in a Karpenter-provisioned node that declares it), with tolerations on the workloads that can tolerate interruption, topology spread, and the cluster's interruption handler so a reclaim is drained rather than a sudden disappearance. PDBs do not help here: they only constrain voluntary evictions (drain, rollout), and spot reclaim is involuntary. Mixing spot and on-demand in one pool means you cannot predict which workloads will be interrupted.
 
 ---
 
@@ -5076,7 +5078,7 @@ spec:
 
 **SELinux labels files and processes with a security context**, and enforcement is kernel-wide. In Kubernetes it matters mainly for **volume labeling**: the kubelet labels mounted volumes so the container's SELinux context can access them, and `securityContext.seLinuxOptions` lets you override that. Kubernetes 1.36 promoted a change to SELinux volume labeling to GA, with documented implications in 1.37 — worth reading the release notes if you run SELinux-enforcing nodes, because volumes that previously mounted successfully can be labeled differently.
 
-**Practical configuration:** set `seccompProfile: RuntimeDefault` and `appArmorProfile: RuntimeDefault` on every workload via a policy or a LimitRange-equivalent default, rather than per-manifest — and let `restricted` Pod Security Admission enforce seccomp for you. For SELinux, verify after any node OS upgrade that your volumes still mount, because this is an area where the platform changed recently.
+**Practical configuration:** set `seccompProfile: RuntimeDefault` and `appArmorProfile: RuntimeDefault` on every workload with a mutating policy (Kyverno, OPA/Gatekeeper, or namespace defaults), not per-manifest. `LimitRange` can only default CPU, memory, and ephemeral-storage — never `securityContext`. Let `restricted` Pod Security Admission enforce seccomp for you. For SELinux, verify after any node OS upgrade that your volumes still mount; this is an area where the platform changed recently.
 
 ## 45.2 ServiceAccount tokens: stop using long-lived credentials
 
@@ -5084,7 +5086,7 @@ Every pod gets a ServiceAccount token mounted at `/var/run/secrets/kubernetes.io
 
 **The old behavior:** a non-expiring JWT stored in a Secret, mounted into every pod, valid forever. Any leak — a log dump, a misconfigured backup, a compromised container — yielded a permanent credential.
 
-**The current behavior (bound tokens):** tokens are **projected, audience-scoped, and time-limited**, and are rotated automatically by the kubelet. They are bound to the pod's identity and cannot be used elsewhere.
+**The current behavior (bound tokens):** tokens are **projected, audience-scoped, and time-limited**, and the kubelet rotates them automatically. Binding and audience shrink the blast radius, but they are still **bearer tokens**: a stolen token can be replayed from anywhere until it expires or the pod/ServiceAccount is deleted. Protect delivery (volumes, not logs) and treat exfiltration as a live credential.
 
 **What to do:**
 
@@ -5225,7 +5227,7 @@ spec:
 
 - **Scaling to zero means cold starts.** A consumer that needs 30 seconds to boot will make the first request after idle slow. Keep a floor (`minReplicaCount: 1`) for anything user-facing.
 - **`maxReplicaCount` above what the downstream can absorb makes things worse.** If a queue feeds a database that supports 50 connections, scaling to 200 consumers causes connection exhaustion and failures — the classic self-inflicted outage. Cap consumers by the *downstream's* capacity, not by the queue depth.
-- **Scaling to zero interacts with PDBs and node autoscaling** — a workload at zero replicas cannot satisfy a PDB, and nodes may be removed while it is idle, so scale-up then waits for node provisioning. The capacity-buffer pattern (Part 37.6) addresses exactly this.
+- **Scaling to zero interacts with PDBs and node autoscaling** — a workload at zero replicas satisfies a PDB vacuously (the real concern is scale-from-zero latency and node provisioning, not a PDB violation), and nodes may be removed while it is idle, so scale-up then waits for node provisioning. The capacity-buffer pattern (Part 37.6) addresses exactly this.
 - **KEDA and HPA must not fight.** KEDA *uses* HPA under the hood; do not also define your own HPA for the same workload.
 
 ## 46.4 Event-driven architecture on Kubernetes
@@ -5328,4 +5330,32 @@ A defensible inner-loop offering for a platform, in the order that removes the m
 
 ---
 
-*Written against an empty cluster and current versions as of late 2026. Version-sensitive claims (feature-gate stages, per-implementation Gateway API support, add-on compatibility) should be re-checked against the upstream release notes for whatever you actually run — that habit is itself part of operating Kubernetes well.*
+# Notes and sources
+
+Written against an empty cluster and current versions as of September 2026. Version-sensitive claims (feature-gate stages, per-implementation Gateway API support, add-on compatibility) should be re-checked against the upstream release notes for whatever you actually run. If your cluster is older than 1.35, treat 1.35+ behaviour as not yet available, not as a mistake in this guide.
+
+## Accuracy notes
+
+A handful of claims that commonly appear in Kubernetes writing — including earlier drafts of this document — are wrong or incomplete. They are corrected in the body. The short version:
+
+- **cgroup v1 is deprecated, not gone.** v2 is the default on modern distros. In 1.37 kubelet refuses v1 unless `failCgroupV1: false`.
+- **DaemonSet pods count against node allocatable.** Budget them; `kubectl describe node` includes them.
+- **HPA scale-to-zero (1.37 Beta)** only works with object or external metrics. CPU/memory-only HPAs cannot set `minReplicas: 0`. You still need a wake path.
+- **In-place resize (Stable 1.35):** CPU does not restart by default; memory does (`RestartContainer`). A CPU+memory change restarts the container.
+- **Node-pressure eviction does not rank by QoS class.** Order is usage vs request, then priority, then magnitude. QoS predicts OOM score.
+- **`Service.spec.externalIPs` was deprecated in 1.36 for security (CVE-2020-8554 / KEP-5707), not because it cannot do dual-stack.**
+- **Requests vs limits:** under-requesting causes overcommit and later eviction. OOMKill is usage vs limits.
+- **Bound ServiceAccount tokens are still bearer tokens.** Binding and audience shrink blast radius; a stolen token still works until it expires.
+- **PDBs only constrain voluntary evictions** (drain, rollout). Spot reclaim, node failure, and OOM are involuntary — PDBs do not apply.
+- **Gateway API route channels (v1.6):** HTTPRoute and GRPCRoute are Standard; TCPRoute and UDPRoute graduated to Standard in v1.6; TLSRoute is still Experimental. Per-rule `retry` and retry budgets are Experimental. CORS is Standard channel but Extended support (not portable Core).
+- **mTLS in a mesh is not automatic on install.** Enroll the workload, then set `PeerAuthentication: STRICT` (default is PERMISSIVE).
+- **cert-manager** is installed from the OCI chart `oci://quay.io/jetstack/charts/cert-manager`. Enable Gateway API support explicitly.
+- **etcdctl** examples should use `healthcheck-client` (or `apiserver-etcd-client`), not `server.crt`.
+- **PriorityClass names:** do not use a `system-` prefix; that prefix is reserved. User-defined values must stay at or below 1,000,000,000.
+- **Server-side sharded list-and-watch** (KEP-5866) is alpha in 1.36 (`ShardedListAndWatch`). WatchList / streaming lists are the generally available related work.
+
+## Sources (checked September 2026)
+
+- Kubernetes: [1.37 Garhwal](https://kubernetes.io/blog/2026/08/26/kubernetes-v1-37-release/), [releases](https://kubernetes.io/releases/), [HPA scale-to-zero](https://kubernetes.io/blog/2026/09/02/kubernetes-v1-37-hpa-scale-to-zero-beta/), [in-place resize](https://kubernetes.io/docs/tasks/configure-pod-container/resize-container-resources/), [cgroup v2](https://kubernetes.io/docs/concepts/architecture/cgroups/), [externalIPs deprecation](https://kubernetes.io/blog/2026/05/14/kubernetes-v1-36-deprecation-and-removal-of-service-externalips/), [Pod Certificates](https://kubernetes.io/blog/2026/08/28/kubernetes-v1-37-pod-certificates-and-cluster-trust-bundles/), [sharded list-and-watch](https://kubernetes.io/blog/2026/05/06/kubernetes-v1-36-server-side-sharded-list-and-watch/)
+- Networking: [Gateway API v1.6](https://kubernetes.io/blog/2026/08/03/gateway-api-v1-6-release/), [Gateway API v1.3](https://kubernetes.io/blog/2025/06/02/gateway-api-v1-3/), [ingress-nginx retirement](https://kubernetes.io/blog/2025/11/11/ingress-nginx-retirement/), [Ingress2Gateway 1.0](https://kubernetes.io/blog/2026/03/20/ingress2gateway-1-0-release/)
+- Ecosystem: [Cilium](https://github.com/cilium/cilium), [Istio](https://github.com/istio/istio/releases) and [ambient GA](https://istio.io/latest/blog/2024/ambient-reaches-ga), [Envoy Gateway](https://gateway.envoyproxy.io/news/releases/v1.9), [cert-manager Helm](https://cert-manager.io/docs/installation/helm/), [etcd 3.7](https://kubernetes.io/blog/2026/07/08/announcing-etcd-3.7/)
